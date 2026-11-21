@@ -53,6 +53,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -85,6 +86,7 @@ add_library(kiss_matcher_slam_core
   src/core/pose_graph_backend.cpp
   src/core/realtime_pose_tracker.cpp
   src/core/scan_context_loop_detector.cpp
+  src/core/system_mode_manager.cpp
   src/core/visualization_state.cpp
 )
 target_include_directories(kiss_matcher_slam_core PUBLIC include ${PCL_INCLUDE_DIRS})
@@ -159,6 +161,10 @@ add_executable(scan_context_benchmark src/tools/scan_context_benchmark.cpp)
 target_include_directories(scan_context_benchmark PUBLIC include ${PCL_INCLUDE_DIRS})
 target_link_libraries(scan_context_benchmark kiss_matcher_slam_core ${PCL_LIBRARIES})
 
+add_executable(system_mode_manager src/system_mode_manager_node.cpp)
+ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs)
+target_link_libraries(system_mode_manager kiss_matcher_slam_core)
+
 install(TARGETS
   kiss_matcher_slam_core
   registration_visualizer
@@ -166,6 +172,7 @@ install(TARGETS
   kiss_matcher_sam
   inter_frame_alignment
   scan_context_benchmark
+  system_mode_manager
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
@@ -224,6 +231,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_visualization_state test/test_visualization_state.cpp)
   target_include_directories(test_visualization_state PRIVATE include ${PCL_INCLUDE_DIRS})
   target_link_libraries(test_visualization_state kiss_matcher_slam_core)
+
+  ament_add_gtest(test_system_mode_manager test/test_system_mode_manager.cpp)
+  target_include_directories(test_system_mode_manager PRIVATE include)
+  target_link_libraries(test_system_mode_manager kiss_matcher_slam_core)
 
   ament_add_gtest(test_loop_closure test/test_loop_closure.cpp src/slam/loop_closure.cpp)
   target_include_directories(test_loop_closure PRIVATE include ${PCL_INCLUDE_DIRS})

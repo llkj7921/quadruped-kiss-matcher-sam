@@ -1,0 +1,10 @@
+launch:
+  - arg: {name: map_directory, default: '', description: "Existing map product used by incremental mapping and relocalization"}
+  - node:
+      pkg: kiss_matcher_ros
+      exec: system_mode_manager
+      name: system_mode_manager
+      output: screen
+      param:
+        - name: map_directory
+          value: $(var map_directory)

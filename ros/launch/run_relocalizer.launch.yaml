@@ -5,6 +5,14 @@ launch:
   - arg: {name: scan_topic, default: '/cloud_registered'}
   - node:
       pkg: kiss_matcher_ros
+      exec: system_mode_manager
+      name: system_mode_manager
+      output: screen
+      param:
+        - name: map_directory
+          value: $(var map_directory)
+  - node:
+      pkg: kiss_matcher_ros
       exec: kiss_matcher_relocalizer
       name: kiss_matcher_relocalizer
       output: screen

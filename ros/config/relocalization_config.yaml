@@ -5,6 +5,7 @@
     query_period_s: 1.0
     required_confirmations: 2
     confirmation_translation_m: 1.0
+    mode_control_enabled: true
 
     voxel_resolution: 0.3
     num_submap_keyframes: 1

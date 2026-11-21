@@ -16,6 +16,8 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "kiss_matcher_slam/core/map_product_loader.hpp"
@@ -58,6 +60,7 @@ class MapRelocalizer final : public rclcpp::Node {
       throw std::invalid_argument("invalid relocalization configuration");
     }
     query_period_s_ = query_period_s;
+    mode_control_enabled_ = declare_parameter<bool>("mode_control_enabled", true);
 
     kiss_matcher_slam::ScanContextConfig scan_context;
     scan_context.num_rings = declare_parameter<int>("scan_context.num_rings", 20);
@@ -96,6 +99,16 @@ class MapRelocalizer final : public rclcpp::Node {
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("pose", 10);
+    localized_pub_ = create_publisher<std_msgs::msg::Bool>(
+        "/relocalization/localized", rclcpp::QoS(1).reliable().transient_local());
+    if (mode_control_enabled_) {
+      mode_sub_ = create_subscription<std_msgs::msg::String>(
+          "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
+          std::bind(&MapRelocalizer::modeCallback, this, std::placeholders::_1));
+    } else {
+      relocalization_active_ = true;
+      normal_mode_active_ = true;
+    }
     using Policy = message_filters::sync_policies::ApproximateTime<nav_msgs::msg::Odometry,
                                                                      sensor_msgs::msg::PointCloud2>;
     odom_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this, "odom");
@@ -106,6 +119,19 @@ class MapRelocalizer final : public rclcpp::Node {
   }
 
  private:
+  void modeCallback(const std_msgs::msg::String::ConstSharedPtr message) {
+    const bool requested = message->data.rfind("mode=relocalization", 0) == 0;
+    normal_mode_active_ = message->data.rfind("mode=normal", 0) == 0;
+    if (requested && !relocalization_active_) {
+      localized_ = false;
+      have_tentative_ = false;
+      confirmations_ = 0;
+      last_query_stamp_ = -std::numeric_limits<double>::infinity();
+      RCLCPP_INFO(get_logger(), "Relocalization mode activated");
+    }
+    relocalization_active_ = requested;
+  }
+
   pcl::PointCloud<PointType> referenceSubmap(const std::size_t center) const {
     pcl::PointCloud<PointType> result;
     const auto radius = submap_keyframes_ / 2;
@@ -150,8 +176,10 @@ class MapRelocalizer final : public rclcpp::Node {
 
   void callback(const nav_msgs::msg::Odometry::ConstSharedPtr &odom,
                 const sensor_msgs::msg::PointCloud2::ConstSharedPtr &cloud) {
+    if (!localized_ && !relocalization_active_) return;
     const auto odom_pose = odometryPose(*odom);
     if (localized_) {
+      if (mode_control_enabled_ && !normal_mode_active_) return;
       publishMapToOdom(*odom);
       return;
     }
@@ -190,8 +218,12 @@ class MapRelocalizer final : public rclcpp::Node {
       if (confirmations_ >= required_confirmations_) {
         map_to_odom_ = tentative_map_to_odom_;
         localized_ = true;
+        relocalization_active_ = false;
         RCLCPP_INFO(get_logger(), "Relocalization confirmed: publishing %s -> %s", map_frame_.c_str(), odom_frame_.c_str());
         publishMapToOdom(*odom);
+        std_msgs::msg::Bool state;
+        state.data = true;
+        localized_pub_->publish(state);
       }
       return;
     }
@@ -208,6 +240,9 @@ class MapRelocalizer final : public rclcpp::Node {
   int confirmations_ = 0;
   double confirmation_translation_m_ = 1.0;
   bool localized_ = false;
+  bool mode_control_enabled_ = true;
+  bool relocalization_active_ = false;
+  bool normal_mode_active_ = false;
   bool have_tentative_ = false;
   std::size_t tentative_candidate_ = 0;
   double voxel_resolution_ = 0.3;
@@ -219,6 +254,8 @@ class MapRelocalizer final : public rclcpp::Node {
   std::unique_ptr<kiss_matcher::LoopClosure> registration_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localized_pub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_sub_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> cloud_sub_;
   std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<nav_msgs::msg::Odometry, sensor_msgs::msg::PointCloud2>>> sync_;

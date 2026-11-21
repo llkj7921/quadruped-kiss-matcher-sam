@@ -134,7 +134,7 @@ ament_target_dependencies(kiss_matcher_sam
 add_executable(kiss_matcher_relocalizer src/relocalizer.cpp
                                         src/slam/loop_closure.cpp)
 ament_target_dependencies(kiss_matcher_relocalizer
-  rclcpp tf2_ros sensor_msgs nav_msgs geometry_msgs pcl_conversions PCL
+  rclcpp tf2_ros sensor_msgs nav_msgs geometry_msgs std_msgs pcl_conversions PCL
 )
 target_link_libraries(kiss_matcher_relocalizer
   kiss_matcher_slam_core kiss_matcher::kiss_matcher_core ${PCL_LIBRARIES} small_gicp gtsam

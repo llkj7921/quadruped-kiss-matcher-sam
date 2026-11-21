@@ -1,8 +1,10 @@
+#include <chrono>
 #include <memory>
 #include <sstream>
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
@@ -18,6 +20,11 @@ class SystemModeManagerNode final : public rclcpp::Node {
     map_directory_ = declare_parameter<std::string>("map_directory", "");
     state_pub_ = create_publisher<std_msgs::msg::String>(
         "system_mode", rclcpp::QoS(1).reliable().transient_local());
+    relocalization_state_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "relocalization/localized", rclcpp::QoS(1).reliable().transient_local(),
+        [this](const std_msgs::msg::Bool::ConstSharedPtr message) {
+          if (message->data) completeRelocalization();
+        });
 
     enter_mapping_ = create_service<std_srvs::srv::Trigger>(
         "mode/enter_mapping",
@@ -97,9 +104,31 @@ class SystemModeManagerNode final : public rclcpp::Node {
     state_pub_->publish(message);
   }
 
+  void completeRelocalization() {
+    if (manager_.snapshot().mode != SystemMode::kRelocalization) return;
+
+    manager_.setLocalizationState(true, true, mapDirectory());
+    const auto exiting = manager_.requestExit();
+    if (!exiting.accepted) return;
+    RCLCPP_INFO(get_logger(), "relocalization confirmed; returning to normal localization");
+    publishState();
+
+    exit_completion_timer_ = create_wall_timer(
+        std::chrono::milliseconds(100), [this]() {
+          exit_completion_timer_->cancel();
+          const auto completed = manager_.completeExit(true);
+          if (!completed.accepted) {
+            RCLCPP_ERROR(get_logger(), "%s", completed.message.c_str());
+          }
+          publishState();
+        });
+  }
+
   SystemModeManager manager_;
   std::string map_directory_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr relocalization_state_sub_;
+  rclcpp::TimerBase::SharedPtr exit_completion_timer_;
   rclcpp::Service<Trigger>::SharedPtr enter_mapping_;
   rclcpp::Service<Trigger>::SharedPtr enter_incremental_mapping_;
   rclcpp::Service<Trigger>::SharedPtr enter_relocalization_;

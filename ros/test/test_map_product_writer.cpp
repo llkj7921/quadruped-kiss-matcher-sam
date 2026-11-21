@@ -9,6 +9,7 @@
 #include <pcl/io/pcd_io.h>
 #include <unistd.h>
 
+#include "kiss_matcher_slam/core/map_product_loader.hpp"
 #include "kiss_matcher_slam/core/map_product_writer.hpp"
 
 namespace {
@@ -133,6 +134,26 @@ TEST_F(MapProductWriterTest, WritesCompleteOptimizedTrajectory) {
 
   poses.pop_back();
   EXPECT_THROW(writer.writeOptimizedTrajectory(keyframes, poses), std::invalid_argument);
+}
+
+TEST_F(MapProductWriterTest, LoadsCompleteMapProductForRelocalization) {
+  kiss_matcher_slam::MapProductWriter writer(config_);
+  writer.initialize();
+  const std::vector<kiss_matcher_slam::Keyframe> keyframes{
+      makeKeyframe(0, 10.0, 0.0), makeKeyframe(1, 11.0, 2.0)};
+  writer.appendKeyframe(keyframes[0]);
+  writer.appendKeyframe(keyframes[1]);
+  const std::vector<Eigen::Matrix4d> optimized{keyframes[0].optimized_pose,
+                                               keyframes[1].optimized_pose};
+  writer.writeOptimizedTrajectory(keyframes, optimized);
+
+  const auto loaded =
+      kiss_matcher_slam::MapProductLoader::load(writer.sequenceDirectory());
+  ASSERT_EQ(loaded.size(), 2U);
+  EXPECT_EQ(loaded[0].id, 0U);
+  EXPECT_DOUBLE_EQ(loaded[1].timestamp, 11.0);
+  EXPECT_NEAR(loaded[1].optimized_pose(0, 3), 2.0, 1e-9);
+  ASSERT_EQ(loaded[1].cloud.size(), 1U);
 }
 
 TEST_F(MapProductWriterTest, BuildsVoxelizedMapFromOptimizedPoses) {

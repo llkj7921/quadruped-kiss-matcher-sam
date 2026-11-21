@@ -282,4 +282,61 @@ std::optional<PlaceCandidate> ScanContextLoopDetector::detect(
   return best;
 }
 
+std::vector<PlaceCandidate> ScanContextLoopDetector::findCandidates(
+    const pcl::PointCloud<SlamPoint> &query_cloud,
+    const std::vector<Keyframe> &map_keyframes) {
+  using Clock = std::chrono::steady_clock;
+  const auto total_start = Clock::now();
+  last_stats_ = {};
+  last_stats_.history_size = map_keyframes.size();
+  if (map_keyframes.empty()) return {};
+
+  const auto descriptor_start = Clock::now();
+  appendMissingDescriptors(map_keyframes);
+  const auto query_descriptor = makeDescriptor(query_cloud);
+  const auto query_ring_key = makeRingKey(query_descriptor);
+  const auto query_sector_key = makeSectorKey(query_descriptor);
+  last_stats_.descriptor_build_ms =
+      std::chrono::duration<double, std::milli>(Clock::now() - descriptor_start).count();
+
+  std::vector<std::size_t> eligible_ids;
+  eligible_ids.reserve(map_keyframes.size());
+  for (std::size_t id = 0; id < map_keyframes.size(); ++id) eligible_ids.push_back(id);
+  if (!ring_key_index_) {
+    ring_key_index_ = std::make_unique<RingKeySearchIndex>(
+        ring_keys_, eligible_ids, config_.num_rings);
+  } else {
+    ring_key_index_->synchronize(eligible_ids);
+  }
+
+  const auto retrieval_start = Clock::now();
+  const std::size_t count = std::min(
+      ring_key_index_->size(), static_cast<std::size_t>(config_.num_candidates));
+  const auto candidate_ids = ring_key_index_->nearest(query_ring_key, count);
+  std::vector<PlaceCandidate> accepted;
+  accepted.reserve(candidate_ids.size());
+  for (const auto candidate_id : candidate_ids) {
+    ++last_stats_.full_descriptor_comparisons;
+    const int coarse_shift = fastAlignUsingSectorKey(query_sector_key, sector_keys_[candidate_id]);
+    const auto result = descriptorDistance(query_descriptor, descriptors_[candidate_id], coarse_shift,
+                                           last_stats_.full_shift_evaluations);
+    if (result.distance >= config_.distance_threshold) continue;
+    int signed_shift = result.sector_shift;
+    if (signed_shift > config_.num_sectors / 2) signed_shift -= config_.num_sectors;
+    accepted.push_back({candidate_id, result.distance,
+                        signed_shift * kTwoPi / config_.num_sectors});
+  }
+  std::sort(accepted.begin(), accepted.end(), [](const auto &a, const auto &b) {
+    return a.descriptor_distance < b.descriptor_distance;
+  });
+  last_stats_.eligible_candidates = eligible_ids.size();
+  last_stats_.indexed_candidates = ring_key_index_->size();
+  last_stats_.shortlisted_candidates = candidate_ids.size();
+  last_stats_.retrieval_ms =
+      std::chrono::duration<double, std::milli>(Clock::now() - retrieval_start).count();
+  last_stats_.total_ms =
+      std::chrono::duration<double, std::milli>(Clock::now() - total_start).count();
+  return accepted;
+}
+
 }  // namespace kiss_matcher_slam

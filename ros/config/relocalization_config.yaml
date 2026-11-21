@@ -1,0 +1,25 @@
+/**:
+  ros__parameters:
+    map_frame: map
+    odom_frame: odom
+    query_period_s: 1.0
+    required_confirmations: 2
+    confirmation_translation_m: 1.0
+
+    voxel_resolution: 0.3
+    num_submap_keyframes: 1
+    scan_context:
+      num_rings: 20
+      num_sectors: 60
+      max_radius: 80.0
+      num_candidates: 10
+      distance_threshold: 0.18
+      sector_search_ratio: 0.1
+    global_reg:
+      num_inliers_threshold: 50
+    local_reg:
+      num_threads: 8
+      correspondences_number: 20
+      max_num_iter: 32
+      scale_factor_for_corr_dist: 5.0
+      overlap_threshold: 55.0

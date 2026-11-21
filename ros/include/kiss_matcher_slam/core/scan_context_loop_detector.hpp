@@ -48,6 +48,10 @@ class ScanContextLoopDetector {
 
   std::optional<PlaceCandidate> detect(const Keyframe &query,
                                        const std::vector<Keyframe> &keyframes);
+  // Query a fixed, pre-built map. Unlike detect(), this does not apply temporal
+  // exclusion because the query belongs to a new localization session.
+  std::vector<PlaceCandidate> findCandidates(const pcl::PointCloud<SlamPoint> &query_cloud,
+                                             const std::vector<Keyframe> &map_keyframes);
   std::size_t descriptorCount() const noexcept { return descriptors_.size(); }
   const ScanContextConfig &config() const noexcept { return config_; }
   const ScanContextDetectionStats &lastStats() const noexcept { return last_stats_; }

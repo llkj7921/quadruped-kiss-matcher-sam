@@ -81,6 +81,7 @@ add_library(kiss_matcher_slam_core
   src/core/loop_candidate_queue.cpp
   src/core/loop_constraint_processor.cpp
   src/core/map_database.cpp
+  src/core/map_product_loader.cpp
   src/core/mapping_runtime_state.cpp
   src/core/map_product_writer.cpp
   src/core/pose_graph_backend.cpp
@@ -130,6 +131,15 @@ ament_target_dependencies(kiss_matcher_sam
   PCL
 )
 
+add_executable(kiss_matcher_relocalizer src/relocalizer.cpp
+                                        src/slam/loop_closure.cpp)
+ament_target_dependencies(kiss_matcher_relocalizer
+  rclcpp tf2_ros sensor_msgs nav_msgs geometry_msgs pcl_conversions PCL
+)
+target_link_libraries(kiss_matcher_relocalizer
+  kiss_matcher_slam_core kiss_matcher::kiss_matcher_core ${PCL_LIBRARIES} small_gicp gtsam
+)
+
 target_link_libraries(kiss_matcher_sam
   kiss_matcher_slam_core
   kiss_matcher::kiss_matcher_core
@@ -170,6 +180,7 @@ install(TARGETS
   registration_visualizer
   run_kiss_matcher
   kiss_matcher_sam
+  kiss_matcher_relocalizer
   inter_frame_alignment
   scan_context_benchmark
   system_mode_manager

@@ -156,4 +156,18 @@ TEST(ScanContextLoopDetector, IncrementallyIndexesEveryEligibleRingKey) {
   EXPECT_EQ(detector.lastStats().indexed_candidates, 2U);
 }
 
+TEST(ScanContextLoopDetector, QueriesAStaticMapWithoutTemporalExclusion) {
+  auto config = testConfig();
+  config.exclude_recent = 30;
+  config.minimum_time_separation_s = 30.0;
+  kiss_matcher_slam::ScanContextLoopDetector detector(config);
+  std::vector<kiss_matcher_slam::Keyframe> reference{
+      makePattern(0, 0.0), makePattern(1, 1.0, kPi), makePattern(2, 2.0, kPi / 2.0)};
+
+  const auto candidates = detector.findCandidates(makePattern(99, 12345.0).cloud, reference);
+  ASSERT_FALSE(candidates.empty());
+  EXPECT_NEAR(candidates.front().descriptor_distance, 0.0, 1e-6);
+  EXPECT_EQ(detector.lastStats().eligible_candidates, 3U);
+}
+
 }  // namespace

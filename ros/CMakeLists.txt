@@ -105,6 +105,7 @@ add_library(kiss_matcher_slam_core
   src/core/map_product_writer.cpp
   src/core/pose_graph_backend.cpp
   src/core/realtime_pose_tracker.cpp
+  src/core/recovery_coordinator.cpp
   src/core/scan_context_loop_detector.cpp
   src/core/system_mode_manager.cpp
   src/core/visualization_state.cpp
@@ -272,6 +273,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_localization_quality_monitor test/test_localization_quality_monitor.cpp)
   target_include_directories(test_localization_quality_monitor PRIVATE include)
   target_link_libraries(test_localization_quality_monitor kiss_matcher_slam_core)
+
+  ament_add_gtest(test_recovery_coordinator test/test_recovery_coordinator.cpp)
+  target_include_directories(test_recovery_coordinator PRIVATE include)
+  target_link_libraries(test_recovery_coordinator kiss_matcher_slam_core)
 
   ament_add_gtest(test_frame_and_transform_contract test/test_frame_and_transform_contract.cpp)
   target_include_directories(test_frame_and_transform_contract PRIVATE include)

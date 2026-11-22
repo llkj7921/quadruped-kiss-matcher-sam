@@ -14,8 +14,8 @@
 #include <slam_system_interfaces/msg/relocalization_status.hpp>
 #include <slam_system_interfaces/msg/system_mode.hpp>
 
+#include "kiss_matcher_slam/core/recovery_coordinator.hpp"
 #include "kiss_matcher_slam/core/system_mode_manager.hpp"
-#include "kiss_matcher_slam/core/localization_quality_monitor.hpp"
 
 namespace kiss_matcher_slam {
 
@@ -45,7 +45,7 @@ class SystemModeManagerNode final : public rclcpp::Node {
                      manager_.snapshot().mode == SystemMode::kExiting) {
             manager_.completeExit(true);
             publishState();
-            if (recovery_pending_) enterRecoveryRelocalization();
+            if (recovery_.recoveryPending()) enterRecoveryRelocalization();
           }
         });
     lidar_recovery_sub_ =
@@ -58,10 +58,8 @@ class SystemModeManagerNode final : public rclcpp::Node {
             beginRecovery(details.str());
           } else if (message->state ==
                          slam_system_interfaces::msg::LidarStreamStatus::DEGRADED &&
-                     !recovery_pending_) {
-            quality_monitor_.markSuspected();
-            recovery_status_ = "suspected";
-            recovery_reason_ = details.str();
+                     !recovery_.recoveryPending()) {
+            recovery_.observeLidarDegraded(details.str());
             publishRecoveryState();
           }
         });
@@ -77,10 +75,9 @@ class SystemModeManagerNode final : public rclcpp::Node {
         [this](const slam_system_interfaces::msg::RelocalizationStatus::ConstSharedPtr message) {
           if (message->state == slam_system_interfaces::msg::RelocalizationStatus::LOCALIZED) {
             completeRelocalization();
-          } else if (recovery_pending_ && message->state ==
+          } else if (recovery_.recoveryPending() && message->state ==
               slam_system_interfaces::msg::RelocalizationStatus::OPERATOR_ASSISTANCE_REQUIRED) {
-            recovery_status_ = "operator_assistance_required";
-            recovery_reason_ = message->reason;
+            recovery_.requireOperatorAssistance(message->reason);
             publishRecoveryState();
           }
         });
@@ -93,7 +90,7 @@ class SystemModeManagerNode final : public rclcpp::Node {
         "mode/enter_mapping",
         [this](const std::shared_ptr<Trigger::Request>,
                std::shared_ptr<Trigger::Response> response) {
-          if (recovery_confirmation_required_) {
+          if (recovery_.confirmationRequired()) {
             rejectForRecovery(response);
           } else {
             respond(manager_.requestEnter(SystemMode::kMapping), response);
@@ -103,7 +100,7 @@ class SystemModeManagerNode final : public rclcpp::Node {
         "mode/enter_incremental_mapping",
         [this](const std::shared_ptr<Trigger::Request>,
                std::shared_ptr<Trigger::Response> response) {
-          if (recovery_confirmation_required_) {
+          if (recovery_.confirmationRequired()) {
             rejectForRecovery(response);
           } else {
             respond(manager_.requestEnter(SystemMode::kIncrementalMapping, mapDirectory()), response);
@@ -139,23 +136,18 @@ class SystemModeManagerNode final : public rclcpp::Node {
         "recovery/status",
         [this](const std::shared_ptr<Trigger::Request>,
                std::shared_ptr<Trigger::Response> response) {
-          response->success = recovery_status_ == "normal";
+          response->success = recovery_.snapshot().state == RecoveryState::kNormal;
           response->message = recoveryDescription();
         });
     recovery_ack_service_ = create_service<std_srvs::srv::Trigger>(
         "recovery/acknowledge",
         [this](const std::shared_ptr<Trigger::Request>,
                std::shared_ptr<Trigger::Response> response) {
-          if (!recovery_confirmation_required_) {
+          if (!recovery_.acknowledgeRecovery()) {
             response->success = false;
             response->message = "no recovered localization is awaiting confirmation";
             return;
           }
-          recovery_confirmation_required_ = false;
-          recovery_pending_ = false;
-          recovery_status_ = "normal";
-          recovery_reason_.clear();
-          quality_monitor_.reset();
           publishRecoveryState();
           response->success = true;
           response->message = recoveryDescription();
@@ -213,9 +205,8 @@ class SystemModeManagerNode final : public rclcpp::Node {
     if (manager_.snapshot().mode != SystemMode::kRelocalization) return;
 
     manager_.setLocalizationState(true, true, mapDirectory());
-    if (recovery_pending_) {
-      recovery_status_ = "recovered_waiting_confirmation";
-      recovery_confirmation_required_ = true;
+    if (recovery_.recoveryPending()) {
+      recovery_.markRelocalized();
       publishRecoveryState();
     }
     const auto exiting = manager_.requestExit();
@@ -235,11 +226,11 @@ class SystemModeManagerNode final : public rclcpp::Node {
   }
 
   void beginRecovery(const std::string& reason) {
-    if (recovery_pending_) return;
-    recovery_pending_ = true;
-    recovery_confirmation_required_ = false;
-    recovery_status_ = "recovering";
-    recovery_reason_ = reason;
+    if (!recovery_.beginRecovery(reason)) return;
+    continueRecoveryWorkflow();
+  }
+
+  void continueRecoveryWorkflow() {
     publishRecoveryState();
 
     const auto mode = manager_.snapshot().mode;
@@ -272,27 +263,18 @@ class SystemModeManagerNode final : public rclcpp::Node {
             << " queue_delay_ms=" << report.queue_delay_ms;
     if (!report.reason.empty()) details << " reason=" << report.reason;
 
-    const auto health = quality_monitor_.update(raw);
-    if (recovery_pending_ || recovery_confirmation_required_) return;
-    if (health == LocalizationHealth::kBad) {
-      beginRecovery(details.str());
-    } else if (health == LocalizationHealth::kSuspected) {
-      recovery_status_ = "suspected";
-      recovery_reason_ = details.str();
-      publishRecoveryState();
-    } else if (recovery_status_ == "suspected") {
-      recovery_status_ = "normal";
-      recovery_reason_.clear();
-      publishRecoveryState();
+    if (recovery_.observeLocalizationQuality(raw, details.str())) {
+      continueRecoveryWorkflow();
+      return;
     }
+    publishRecoveryState();
   }
 
   void enterRecoveryRelocalization() {
     const auto entered =
         manager_.requestEnter(SystemMode::kRelocalization, mapDirectory());
     if (!entered.accepted) {
-      recovery_status_ = "operator_assistance_required";
-      recovery_reason_ = entered.message;
+      recovery_.requireOperatorAssistance(entered.message);
       publishRecoveryState();
     }
     publishState();
@@ -306,15 +288,13 @@ class SystemModeManagerNode final : public rclcpp::Node {
   }
 
   std::string recoveryDescription() const {
-    const bool recovered = recovery_status_ == "normal";
-    const bool map_writes = recovered && !recovery_confirmation_required_;
-    const bool autonomy = recovered && !recovery_confirmation_required_;
+    const auto& recovery = recovery_.snapshot();
     std::ostringstream stream;
-    stream << "status=" << recovery_status_
-           << " motion_allowed=true"
-           << " map_writes_allowed=" << (map_writes ? "true" : "false")
-           << " autonomy_allowed=" << (autonomy ? "true" : "false");
-    if (!recovery_reason_.empty()) stream << " reason=" << recovery_reason_;
+    stream << "status=" << toString(recovery.state)
+           << " motion_allowed=" << (recovery.motion_allowed ? "true" : "false")
+           << " map_writes_allowed=" << (recovery.map_writes_allowed ? "true" : "false")
+           << " autonomy_allowed=" << (recovery.autonomy_allowed ? "true" : "false");
+    if (!recovery.reason.empty()) stream << " reason=" << recovery.reason;
     return stream.str();
   }
 
@@ -323,24 +303,24 @@ class SystemModeManagerNode final : public rclcpp::Node {
     message.data = recoveryDescription();
     recovery_pub_->publish(message);
     slam_system_interfaces::msg::RecoveryStatus typed;
-    if (recovery_status_ == "normal") {
+    const auto& recovery = recovery_.snapshot();
+    if (recovery.state == RecoveryState::kNormal) {
       typed.state = slam_system_interfaces::msg::RecoveryStatus::NORMAL;
-    } else if (recovery_status_ == "suspected") {
+    } else if (recovery.state == RecoveryState::kSuspected) {
       typed.state = slam_system_interfaces::msg::RecoveryStatus::SUSPECTED;
-    } else if (recovery_status_ == "recovering") {
+    } else if (recovery.state == RecoveryState::kRecovering) {
       typed.state = slam_system_interfaces::msg::RecoveryStatus::RECOVERING;
-    } else if (recovery_status_ == "operator_assistance_required") {
+    } else if (recovery.state == RecoveryState::kOperatorAssistanceRequired) {
       typed.state =
           slam_system_interfaces::msg::RecoveryStatus::OPERATOR_ASSISTANCE_REQUIRED;
     } else {
       typed.state =
           slam_system_interfaces::msg::RecoveryStatus::RECOVERED_WAITING_CONFIRMATION;
     }
-    const bool normal = typed.state == slam_system_interfaces::msg::RecoveryStatus::NORMAL;
-    typed.motion_allowed = true;
-    typed.map_writes_allowed = normal && !recovery_confirmation_required_;
-    typed.autonomy_allowed = normal && !recovery_confirmation_required_;
-    typed.reason = recovery_reason_;
+    typed.motion_allowed = recovery.motion_allowed;
+    typed.map_writes_allowed = recovery.map_writes_allowed;
+    typed.autonomy_allowed = recovery.autonomy_allowed;
+    typed.reason = recovery.reason;
     recovery_typed_pub_->publish(typed);
   }
 
@@ -363,7 +343,7 @@ class SystemModeManagerNode final : public rclcpp::Node {
   }
 
   SystemModeManager manager_;
-  LocalizationQualityMonitor quality_monitor_;
+  RecoveryCoordinator recovery_;
   std::string map_directory_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
   rclcpp::Publisher<slam_system_interfaces::msg::SystemMode>::SharedPtr state_typed_pub_;
@@ -387,10 +367,6 @@ class SystemModeManagerNode final : public rclcpp::Node {
   rclcpp::Service<Trigger>::SharedPtr status_;
   rclcpp::Service<Trigger>::SharedPtr recovery_status_service_;
   rclcpp::Service<Trigger>::SharedPtr recovery_ack_service_;
-  bool recovery_pending_ = false;
-  bool recovery_confirmation_required_ = false;
-  std::string recovery_status_ = "normal";
-  std::string recovery_reason_;
 };
 
 }  // namespace kiss_matcher_slam

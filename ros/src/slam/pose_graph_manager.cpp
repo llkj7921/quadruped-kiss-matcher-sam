@@ -11,123 +11,44 @@ using namespace kiss_matcher;
 
 PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
     : rclcpp::Node("km_sam", options) {
-  double loop_detector_hz;
-  double loop_nnsearch_hz;
-  bool enable_loop_nnsearch;
-  double map_update_hz;
-  double vis_hz;
-
-  LoopClosureConfig lc_config;
-  kiss_matcher_slam::ScanContextConfig scan_context_config;
-  auto &gc = lc_config.gicp_config_;
-
-  map_frame_             = declare_parameter<std::string>("map_frame", "map");
-  odom_frame_            = declare_parameter<std::string>("odom_frame", "odom");
-  if (!kiss_matcher_slam::distinctMapAndOdometryFrames(map_frame_, odom_frame_)) {
-    throw std::invalid_argument("map_frame and odom_frame must be distinct and non-empty");
-  }
-  base_frame_            = declare_parameter<std::string>("base_frame", "base");
-  loop_detector_hz       = declare_parameter<double>("loop_detector_hz", 1.0);
-  loop_nnsearch_hz       = declare_parameter<double>("loop_nnsearch_hz", 1.0);
-  enable_loop_nnsearch   = declare_parameter<bool>("loop.enable_nnsearch", false);
-  map_update_hz          = declare_parameter<double>("map_update_hz", 0.2);
-  vis_hz                 = declare_parameter<double>("vis_hz", 0.5);
-  mode_control_enabled_ = declare_parameter<bool>("mode_control_enabled", false);
-  incremental_map_directory_ =
-      declare_parameter<std::string>("incremental_map_directory", "");
+  auto config = loadConfig();
+  map_frame_ = config.map_frame;
+  odom_frame_ = config.odom_frame;
+  base_frame_ = config.base_frame;
+  mode_control_enabled_ = config.mode_control_enabled;
+  incremental_map_directory_ = config.incremental_map_directory;
   mapping_active_ = !mode_control_enabled_;
+  store_voxelized_scan_ = config.store_voxelized_scan;
+  scan_voxel_res_ = config.loop_closure.voxel_res_;
+  map_voxel_res_ = config.map_voxel_resolution;
+  save_voxel_res_ = config.save_voxel_resolution;
+  scan_context_verbose_ = config.scan_context_verbose;
+  scan_context_enabled_ = config.scan_context_enabled;
+  save_map_pcd_ = config.save_map_pcd;
+  save_in_kitti_format_ = config.save_in_kitti_format;
+  seq_name_ = config.sequence_name;
+  output_directory_ = config.output_directory;
+  save_keyframes_incrementally_ = config.save_keyframes_incrementally;
+  overwrite_existing_product_ = config.overwrite_existing_product;
+  const double keyframe_translation_threshold_m =
+      config.keyframe_processor.selection.translation_threshold_m;
+  const double keyframe_rotation_threshold_rad =
+      config.keyframe_processor.selection.rotation_threshold_rad;
 
-  store_voxelized_scan_            = declare_parameter<bool>("store_voxelized_scan", false);
-  lc_config.voxel_res_             = declare_parameter<double>("voxel_resolution", 0.3);
-  lc_config.matcher_config_ = KISSMatcherConfig(lc_config.voxel_res_, false);
-  scan_voxel_res_                  = lc_config.voxel_res_;
-  map_voxel_res_                   = declare_parameter<double>("map_voxel_resolution", 1.0);
-  save_voxel_res_                  = declare_parameter<double>("save_voxel_resolution", 0.3);
-  kiss_matcher_slam::KeyframeSelectorConfig keyframe_config;
-  keyframe_config.translation_threshold_m =
-      declare_parameter<double>("keyframe.keyframe_threshold", 1.0);
-  keyframe_config.rotation_threshold_rad =
-      declare_parameter<double>("keyframe.rotation_threshold_deg", 10.0) * M_PI / 180.0;
-  keyframe_config.minimum_time_interval_s =
-      declare_parameter<double>("keyframe.minimum_time_interval", 0.0);
-  lc_config.num_submap_keyframes_  = declare_parameter<int>("keyframe.num_submap_keyframes", 5);
-  lc_config.verbose_               = declare_parameter<bool>("loop.verbose", false);
-  lc_config.is_multilayer_env_     = declare_parameter<bool>("loop.is_multilayer_env", false);
-  lc_config.loop_detection_radius_ = declare_parameter<double>("loop.loop_detection_radius", 15.0);
-  lc_config.loop_detection_timediff_threshold_ =
-      declare_parameter<double>("loop.loop_detection_timediff_threshold", 10.0);
-
-  gc.num_threads_               = declare_parameter<int>("local_reg.num_threads", 8);
-  gc.correspondence_randomness_ = declare_parameter<int>("local_reg.correspondences_number", 20);
-  gc.max_num_iter_              = declare_parameter<int>("local_reg.max_num_iter", 32);
-  gc.scale_factor_for_corr_dist_ =
-      declare_parameter<double>("local_reg.scale_factor_for_corr_dist", 5.0);
-  gc.overlap_threshold_ = declare_parameter<double>("local_reg.overlap_threshold", 90.0);
-
-  lc_config.enable_global_registration_ = declare_parameter<bool>("global_reg.enable", false);
-  lc_config.num_inliers_threshold_ =
-      declare_parameter<int>("global_reg.num_inliers_threshold", 100);
-
-  scan_context_verbose_ = declare_parameter<bool>("scan_context.verbose", false);
-  scan_context_enabled_ = declare_parameter<bool>("scan_context.enable", true);
-  scan_context_config.num_rings = declare_parameter<int>("scan_context.num_rings", 20);
-  scan_context_config.num_sectors = declare_parameter<int>("scan_context.num_sectors", 60);
-  scan_context_config.exclude_recent = declare_parameter<int>("scan_context.exclude_recent", 30);
-  scan_context_config.num_candidates = declare_parameter<int>("scan_context.num_candidates", 10);
-  scan_context_config.max_radius_m = declare_parameter<double>("scan_context.max_radius", 80.0);
-  scan_context_config.distance_threshold =
-      declare_parameter<double>("scan_context.distance_threshold", 0.18);
-  scan_context_config.sector_search_ratio =
-      declare_parameter<double>("scan_context.sector_search_ratio", 0.1);
-  scan_context_config.minimum_time_separation_s =
-      declare_parameter<double>("scan_context.min_time_separation", 30.0);
-
-  auto prior_variances = declare_parameter<std::vector<double>>(
-      "pose_graph.prior_variances", {1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2});
-  auto odom_variances = declare_parameter<std::vector<double>>(
-      "pose_graph.odom_variances", {1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2});
-  kiss_matcher_slam::LoopConstraintConfig loop_constraint_config;
-  loop_constraint_config.base_variances = declare_parameter<std::vector<double>>(
-      "pose_graph.loop_variances", {1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2});
-  loop_constraint_config.huber_k =
-      declare_parameter<double>("pose_graph.loop_huber_k", 1.345);
-  loop_constraint_config.adaptive_noise =
-      declare_parameter<bool>("pose_graph.adaptive_loop_noise", true);
   loop_constraint_processor_ =
       std::make_unique<kiss_matcher_slam::LoopConstraintProcessor>(
-          std::move(loop_constraint_config),
+          std::move(config.loop_constraint),
           pose_graph_backend_,
           visualization_state_,
           runtime_state_);
-
-  kiss_matcher_slam::GpsAltitudeConfig gps_config;
-  gps_config.enabled = declare_parameter<bool>("gps_altitude.enable", false);
-  gps_config.time_tolerance_s =
-      declare_parameter<double>("gps_altitude.time_tolerance", 0.2);
-  gps_config.xy_variance = declare_parameter<double>("gps_altitude.xy_variance", 1e8);
-  gps_config.z_variance = declare_parameter<double>("gps_altitude.z_variance", 4.0);
-  gps_config.huber_k = declare_parameter<double>("gps_altitude.huber_k", 1.345);
   gps_altitude_manager_ =
-      std::make_unique<kiss_matcher_slam::GpsAltitudeManager>(gps_config);
-  kiss_matcher_slam::KeyframeProcessorConfig keyframe_processor_config;
-  keyframe_processor_config.selection = keyframe_config;
-  keyframe_processor_config.prior_variances = std::move(prior_variances);
-  keyframe_processor_config.odometry_variances = std::move(odom_variances);
+      std::make_unique<kiss_matcher_slam::GpsAltitudeManager>(config.gps_altitude);
   keyframe_processor_ = std::make_unique<kiss_matcher_slam::KeyframeProcessor>(
-      std::move(keyframe_processor_config),
+      std::move(config.keyframe_processor),
       map_database_,
       pose_graph_backend_,
       *gps_altitude_manager_,
       runtime_state_);
-
-  save_map_pcd_         = declare_parameter<bool>("result.save_map_pcd", false);
-  save_in_kitti_format_ = declare_parameter<bool>("result.save_in_kitti_format", false);
-  seq_name_             = declare_parameter<std::string>("result.seq_name", "sequence");
-  output_directory_ = declare_parameter<std::string>("result.output_directory", "maps");
-  save_keyframes_incrementally_ =
-      declare_parameter<bool>("result.save_keyframes_incrementally", false);
-  overwrite_existing_product_ =
-      declare_parameter<bool>("result.overwrite_existing", false);
 
   rclcpp::QoS qos(1);
   qos.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
@@ -137,8 +58,8 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-  loop_closure_          = std::make_shared<LoopClosure>(lc_config, this->get_logger());
-  loop_detection_radius_ = lc_config.loop_detection_radius_;
+  loop_closure_ = std::make_shared<LoopClosure>(config.loop_closure, get_logger());
+  loop_detection_radius_ = config.loop_closure.loop_detection_radius_;
   loop_registration_coordinator_ =
       std::make_unique<kiss_matcher_slam::LoopRegistrationCoordinator>(
           loop_candidate_queue_,
@@ -147,7 +68,7 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
           *loop_constraint_processor_);
 
   scan_context_detector_ =
-      std::make_unique<kiss_matcher_slam::ScanContextLoopDetector>(scan_context_config);
+      std::make_unique<kiss_matcher_slam::ScanContextLoopDetector>(config.scan_context);
 
   initializeRosInterfaces(qos);
 
@@ -158,9 +79,9 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   product_config.base_frame = base_frame_;
   product_config.save_voxel_resolution = save_voxel_res_;
   product_config.keyframe_translation_threshold_m =
-      keyframe_config.translation_threshold_m;
+      keyframe_translation_threshold_m;
   product_config.keyframe_rotation_threshold_rad =
-      keyframe_config.rotation_threshold_rad;
+      keyframe_rotation_threshold_rad;
   product_config.gps_altitude_enabled = gps_altitude_manager_->enabled();
   product_config.save_keyframes_incrementally = save_keyframes_incrementally_;
   product_config.overwrite_existing = overwrite_existing_product_;
@@ -174,10 +95,11 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   map_builder_config.keyframe_clouds_are_voxelized = store_voxelized_scan_;
   map_builder_ =
       std::make_unique<kiss_matcher_slam::IncrementalMapBuilder>(map_builder_config);
-  initializeTimers(map_update_hz, loop_detector_hz, enable_loop_nnsearch,
-                   loop_nnsearch_hz, vis_hz);
+  initializeTimers(config.map_update_hz, config.loop_detector_hz,
+                   config.enable_loop_nnsearch, config.loop_nnsearch_hz,
+                   config.visualization_hz);
 
-  if (!lc_config.is_multilayer_env_) {
+  if (!config.loop_closure.is_multilayer_env_) {
     RCLCPP_WARN(
         get_logger(),
         "'loop.is_multilayer_env' is set to `false`. "
@@ -186,6 +108,108 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
         "consider setting it to true to enable full 3D NN search for loop candidates.");
   }
   RCLCPP_INFO(this->get_logger(), "Main class, starting node...");
+}
+
+PoseGraphManagerConfig PoseGraphManager::loadConfig() {
+  PoseGraphManagerConfig config;
+  config.map_frame = declare_parameter<std::string>("map_frame", "map");
+  config.odom_frame = declare_parameter<std::string>("odom_frame", "odom");
+  config.base_frame = declare_parameter<std::string>("base_frame", "base");
+  if (!kiss_matcher_slam::distinctMapAndOdometryFrames(config.map_frame,
+                                                        config.odom_frame)) {
+    throw std::invalid_argument("map_frame and odom_frame must be distinct and non-empty");
+  }
+  config.loop_detector_hz = declare_parameter<double>("loop_detector_hz", 1.0);
+  config.loop_nnsearch_hz = declare_parameter<double>("loop_nnsearch_hz", 1.0);
+  config.enable_loop_nnsearch = declare_parameter<bool>("loop.enable_nnsearch", false);
+  config.map_update_hz = declare_parameter<double>("map_update_hz", 0.2);
+  config.visualization_hz = declare_parameter<double>("vis_hz", 0.5);
+  config.mode_control_enabled = declare_parameter<bool>("mode_control_enabled", false);
+  config.incremental_map_directory =
+      declare_parameter<std::string>("incremental_map_directory", "");
+  config.store_voxelized_scan = declare_parameter<bool>("store_voxelized_scan", false);
+
+  auto &loop = config.loop_closure;
+  loop.voxel_res_ = declare_parameter<double>("voxel_resolution", 0.3);
+  loop.matcher_config_ = KISSMatcherConfig(loop.voxel_res_, false);
+  config.map_voxel_resolution = declare_parameter<double>("map_voxel_resolution", 1.0);
+  config.save_voxel_resolution = declare_parameter<double>("save_voxel_resolution", 0.3);
+  auto &selection = config.keyframe_processor.selection;
+  selection.translation_threshold_m =
+      declare_parameter<double>("keyframe.keyframe_threshold", 1.0);
+  selection.rotation_threshold_rad =
+      declare_parameter<double>("keyframe.rotation_threshold_deg", 10.0) * M_PI / 180.0;
+  selection.minimum_time_interval_s =
+      declare_parameter<double>("keyframe.minimum_time_interval", 0.0);
+  loop.num_submap_keyframes_ = declare_parameter<int>("keyframe.num_submap_keyframes", 5);
+  loop.verbose_ = declare_parameter<bool>("loop.verbose", false);
+  loop.is_multilayer_env_ = declare_parameter<bool>("loop.is_multilayer_env", false);
+  loop.loop_detection_radius_ =
+      declare_parameter<double>("loop.loop_detection_radius", 15.0);
+  loop.loop_detection_timediff_threshold_ =
+      declare_parameter<double>("loop.loop_detection_timediff_threshold", 10.0);
+  auto &gicp = loop.gicp_config_;
+  gicp.num_threads_ = declare_parameter<int>("local_reg.num_threads", 8);
+  gicp.correspondence_randomness_ =
+      declare_parameter<int>("local_reg.correspondences_number", 20);
+  gicp.max_num_iter_ = declare_parameter<int>("local_reg.max_num_iter", 32);
+  gicp.scale_factor_for_corr_dist_ =
+      declare_parameter<double>("local_reg.scale_factor_for_corr_dist", 5.0);
+  gicp.overlap_threshold_ = declare_parameter<double>("local_reg.overlap_threshold", 90.0);
+  loop.enable_global_registration_ = declare_parameter<bool>("global_reg.enable", false);
+  loop.num_inliers_threshold_ =
+      declare_parameter<int>("global_reg.num_inliers_threshold", 100);
+
+  config.scan_context_verbose = declare_parameter<bool>("scan_context.verbose", false);
+  config.scan_context_enabled = declare_parameter<bool>("scan_context.enable", true);
+  auto &scan_context = config.scan_context;
+  scan_context.num_rings = declare_parameter<int>("scan_context.num_rings", 20);
+  scan_context.num_sectors = declare_parameter<int>("scan_context.num_sectors", 60);
+  scan_context.exclude_recent = declare_parameter<int>("scan_context.exclude_recent", 30);
+  scan_context.num_candidates = declare_parameter<int>("scan_context.num_candidates", 10);
+  scan_context.max_radius_m = declare_parameter<double>("scan_context.max_radius", 80.0);
+  scan_context.distance_threshold =
+      declare_parameter<double>("scan_context.distance_threshold", 0.18);
+  scan_context.sector_search_ratio =
+      declare_parameter<double>("scan_context.sector_search_ratio", 0.1);
+  scan_context.minimum_time_separation_s =
+      declare_parameter<double>("scan_context.min_time_separation", 30.0);
+
+  config.keyframe_processor.prior_variances = declare_parameter<std::vector<double>>(
+      "pose_graph.prior_variances", {1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2});
+  config.keyframe_processor.odometry_variances = declare_parameter<std::vector<double>>(
+      "pose_graph.odom_variances", {1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2});
+  config.loop_constraint.base_variances = declare_parameter<std::vector<double>>(
+      "pose_graph.loop_variances", {1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2});
+  config.loop_constraint.huber_k =
+      declare_parameter<double>("pose_graph.loop_huber_k", 1.345);
+  config.loop_constraint.adaptive_noise =
+      declare_parameter<bool>("pose_graph.adaptive_loop_noise", true);
+
+  auto &gps = config.gps_altitude;
+  gps.enabled = declare_parameter<bool>("gps_altitude.enable", false);
+  gps.time_tolerance_s = declare_parameter<double>("gps_altitude.time_tolerance", 0.2);
+  gps.xy_variance = declare_parameter<double>("gps_altitude.xy_variance", 1e8);
+  gps.z_variance = declare_parameter<double>("gps_altitude.z_variance", 4.0);
+  gps.huber_k = declare_parameter<double>("gps_altitude.huber_k", 1.345);
+
+  config.save_map_pcd = declare_parameter<bool>("result.save_map_pcd", false);
+  config.save_in_kitti_format =
+      declare_parameter<bool>("result.save_in_kitti_format", false);
+  config.sequence_name = declare_parameter<std::string>("result.seq_name", "sequence");
+  config.output_directory =
+      declare_parameter<std::string>("result.output_directory", "maps");
+  config.save_keyframes_incrementally =
+      declare_parameter<bool>("result.save_keyframes_incrementally", false);
+  config.overwrite_existing_product =
+      declare_parameter<bool>("result.overwrite_existing", false);
+  if (!std::isfinite(config.loop_detector_hz) || config.loop_detector_hz <= 0.0 ||
+      !std::isfinite(config.loop_nnsearch_hz) || config.loop_nnsearch_hz <= 0.0 ||
+      !std::isfinite(config.map_update_hz) || config.map_update_hz <= 0.0 ||
+      !std::isfinite(config.visualization_hz) || config.visualization_hz <= 0.0) {
+    throw std::invalid_argument("pose graph timer frequencies must be finite and positive");
+  }
+  return config;
 }
 
 void PoseGraphManager::initializeRosInterfaces(const rclcpp::QoS &latched_qos) {

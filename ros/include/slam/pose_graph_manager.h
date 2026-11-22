@@ -65,6 +65,35 @@ using NodeSyncPolicy =
     message_filters::sync_policies::ApproximateTime<nav_msgs::msg::Odometry,
                                                     sensor_msgs::msg::PointCloud2>;
 
+struct PoseGraphManagerConfig {
+  std::string map_frame;
+  std::string odom_frame;
+  std::string base_frame;
+  std::string incremental_map_directory;
+  double loop_detector_hz = 1.0;
+  double loop_nnsearch_hz = 1.0;
+  double map_update_hz = 0.2;
+  double visualization_hz = 0.5;
+  bool enable_loop_nnsearch = false;
+  bool mode_control_enabled = false;
+  bool store_voxelized_scan = false;
+  double map_voxel_resolution = 1.0;
+  double save_voxel_resolution = 0.3;
+  bool scan_context_enabled = true;
+  bool scan_context_verbose = false;
+  kiss_matcher::LoopClosureConfig loop_closure;
+  kiss_matcher_slam::ScanContextConfig scan_context;
+  kiss_matcher_slam::KeyframeProcessorConfig keyframe_processor;
+  kiss_matcher_slam::LoopConstraintConfig loop_constraint;
+  kiss_matcher_slam::GpsAltitudeConfig gps_altitude;
+  bool save_map_pcd = false;
+  bool save_in_kitti_format = false;
+  std::string sequence_name;
+  std::string output_directory;
+  bool save_keyframes_incrementally = false;
+  bool overwrite_existing_product = false;
+};
+
 class PoseGraphManager : public rclcpp::Node {
  public:
   PoseGraphManager() = delete;
@@ -72,6 +101,7 @@ class PoseGraphManager : public rclcpp::Node {
   ~PoseGraphManager();
 
  private:
+  PoseGraphManagerConfig loadConfig();
   void initializeRosInterfaces(const rclcpp::QoS &latched_qos);
   void initializeTimers(double map_update_hz,
                         double loop_detector_hz,

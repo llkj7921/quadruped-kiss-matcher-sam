@@ -201,6 +201,8 @@ install(TARGETS
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_recovery_state_chain.py TIMEOUT 60)
   ament_add_gtest(test_gps_altitude_manager test/test_gps_altitude_manager.cpp)
   target_include_directories(test_gps_altitude_manager PRIVATE include ${PCL_INCLUDE_DIRS})
   target_link_libraries(test_gps_altitude_manager kiss_matcher_slam_core)

@@ -6,6 +6,7 @@ import launch_ros.actions
 import launch_testing.actions
 import pytest
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from slam_system_interfaces.msg import LocalizationHealth, RecoveryStatus, SystemMode
 from std_msgs.msg import Bool
@@ -21,9 +22,18 @@ def generate_test_description():
         parameters=[{"map_directory": "/tmp/recovery-state-chain-map"}],
         output="screen",
     )
+    fast_lio = launch_ros.actions.Node(
+        package="spark_fast_lio",
+        executable="spark_lio_mapping",
+        name="fast_lio_recovery_integration_test",
+        parameters=[
+            get_package_share_directory("spark_fast_lio") + "/config/mid360.yaml"
+        ],
+        output="screen",
+    )
     return launch.LaunchDescription(
-        [manager, launch_testing.actions.ReadyToTest()]
-    ), {"manager": manager}
+        [manager, fast_lio, launch_testing.actions.ReadyToTest()]
+    ), {"manager": manager, "fast_lio": fast_lio}
 
 
 class TestRecoveryStateChain(unittest.TestCase):
@@ -44,6 +54,7 @@ class TestRecoveryStateChain(unittest.TestCase):
         )
         self.recovery = None
         self.mode = None
+        self.map_updates_allowed = None
         self.health_pub = self.node.create_publisher(
             LocalizationHealth, "/localization/health", self.latched_qos
         )
@@ -60,6 +71,12 @@ class TestRecoveryStateChain(unittest.TestCase):
             SystemMode,
             "/system_mode/state",
             lambda message: setattr(self, "mode", message),
+            self.latched_qos,
+        )
+        self.map_permission_sub = self.node.create_subscription(
+            Bool,
+            "/frontend/map_updates_allowed",
+            lambda message: setattr(self, "map_updates_allowed", message.data),
             self.latched_qos,
         )
         self.ack_client = self.node.create_client(Trigger, "/recovery/acknowledge")
@@ -95,6 +112,7 @@ class TestRecoveryStateChain(unittest.TestCase):
             and self.recovery.state == RecoveryStatus.NORMAL
             and self.mode is not None
             and self.mode.mode == SystemMode.NORMAL
+            and self.map_updates_allowed is True
         )
         self.spin_until(lambda: self.health_pub.get_subscription_count() > 0)
 
@@ -106,6 +124,7 @@ class TestRecoveryStateChain(unittest.TestCase):
             and not self.recovery.map_writes_allowed
             and not self.recovery.autonomy_allowed
             and self.mode.mode == SystemMode.RELOCALIZATION
+            and self.map_updates_allowed is False
         )
 
         localized = Bool()
@@ -128,6 +147,7 @@ class TestRecoveryStateChain(unittest.TestCase):
             lambda: self.recovery.state == RecoveryStatus.NORMAL
             and self.recovery.map_writes_allowed
             and self.recovery.autonomy_allowed
+            and self.map_updates_allowed is True
         )
 
         late_state = []

@@ -20,6 +20,14 @@ if (USE_ADDRESS_SANITIZER)
     add_link_options(-fsanitize=address -fsanitize-recover=address)
 endif()
 
+# oneTBB probes the assembler version and parses its text output. Some
+# versions set only LANG=C for that probe, which is ineffective when the
+# caller has LC_ALL=zh_CN. Set the configure-process environment before any
+# third-party add_subdirectory call. This does not change the caller's shell.
+set(ENV{LC_ALL} "C")
+set(ENV{LANG} "C")
+set(ENV{LANGUAGE} "C")
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/kiss_matcher/ AND NOT IS_SYMLINK ${CMAKE_CURRENT_SOURCE_DIR})
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../cpp/kiss_matcher ${CMAKE_CURRENT_BINARY_DIR}/kiss_matcher)
 else()

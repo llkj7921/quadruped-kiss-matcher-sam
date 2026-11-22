@@ -60,6 +60,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(slam_system_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -135,6 +136,7 @@ ament_target_dependencies(kiss_matcher_sam
   sensor_msgs
   nav_msgs
   visualization_msgs
+  slam_system_interfaces
   pcl_conversions
   PCL
 )
@@ -142,7 +144,7 @@ ament_target_dependencies(kiss_matcher_sam
 add_executable(kiss_matcher_relocalizer src/relocalizer.cpp
                                         src/slam/loop_closure.cpp)
 ament_target_dependencies(kiss_matcher_relocalizer
-  rclcpp tf2_ros sensor_msgs nav_msgs geometry_msgs std_msgs pcl_conversions PCL
+  rclcpp tf2_ros sensor_msgs nav_msgs geometry_msgs std_msgs slam_system_interfaces pcl_conversions PCL
 )
 target_link_libraries(kiss_matcher_relocalizer
   kiss_matcher_slam_core kiss_matcher::kiss_matcher_core ${PCL_LIBRARIES} small_gicp gtsam
@@ -180,7 +182,7 @@ target_include_directories(scan_context_benchmark PUBLIC include ${PCL_INCLUDE_D
 target_link_libraries(scan_context_benchmark kiss_matcher_slam_core ${PCL_LIBRARIES})
 
 add_executable(system_mode_manager src/system_mode_manager_node.cpp)
-ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs)
+ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs slam_system_interfaces)
 target_link_libraries(system_mode_manager kiss_matcher_slam_core)
 
 install(TARGETS

@@ -7,6 +7,9 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <slam_system_interfaces/msg/localization_health.hpp>
+#include <slam_system_interfaces/msg/recovery_status.hpp>
+#include <slam_system_interfaces/msg/system_mode.hpp>
 
 #include "kiss_matcher_slam/core/system_mode_manager.hpp"
 #include "kiss_matcher_slam/core/localization_quality_monitor.hpp"
@@ -21,6 +24,8 @@ class SystemModeManagerNode final : public rclcpp::Node {
     map_directory_ = declare_parameter<std::string>("map_directory", "");
     state_pub_ = create_publisher<std_msgs::msg::String>(
         "system_mode", rclcpp::QoS(1).reliable().transient_local());
+    state_typed_pub_ = create_publisher<slam_system_interfaces::msg::SystemMode>(
+        "/system_mode/state", rclcpp::QoS(1).reliable().transient_local());
     relocalization_state_sub_ = create_subscription<std_msgs::msg::Bool>(
         "relocalization/localized", rclcpp::QoS(1).reliable().transient_local(),
         [this](const std_msgs::msg::Bool::ConstSharedPtr message) {
@@ -56,11 +61,12 @@ class SystemModeManagerNode final : public rclcpp::Node {
             publishRecoveryState();
           }
         });
-    localization_quality_sub_ = create_subscription<std_msgs::msg::String>(
-        "/localization/quality", rclcpp::QoS(1).reliable().transient_local(),
-        [this](const std_msgs::msg::String::ConstSharedPtr message) {
-          handleLocalizationQuality(message->data);
-        });
+    localization_health_sub_ =
+        create_subscription<slam_system_interfaces::msg::LocalizationHealth>(
+            "/localization/health", rclcpp::QoS(1).reliable().transient_local(),
+            [this](const slam_system_interfaces::msg::LocalizationHealth::ConstSharedPtr message) {
+              handleLocalizationHealth(*message);
+            });
     relocalization_recovery_sub_ = create_subscription<std_msgs::msg::String>(
         "/relocalization/recovery_status", rclcpp::QoS(1).reliable().transient_local(),
         [this](const std_msgs::msg::String::ConstSharedPtr message) {
@@ -71,6 +77,8 @@ class SystemModeManagerNode final : public rclcpp::Node {
         });
     recovery_pub_ = create_publisher<std_msgs::msg::String>(
         "/recovery/status", rclcpp::QoS(1).reliable().transient_local());
+    recovery_typed_pub_ = create_publisher<slam_system_interfaces::msg::RecoveryStatus>(
+        "/recovery/state", rclcpp::QoS(1).reliable().transient_local());
 
     enter_mapping_ = create_service<std_srvs::srv::Trigger>(
         "mode/enter_mapping",
@@ -179,9 +187,17 @@ class SystemModeManagerNode final : public rclcpp::Node {
   }
 
   void publishState() {
+    const auto snapshot = manager_.snapshot();
     std_msgs::msg::String message;
-    message.data = describe(manager_.snapshot());
+    message.data = describe(snapshot);
     state_pub_->publish(message);
+    slam_system_interfaces::msg::SystemMode typed;
+    typed.mode = static_cast<uint8_t>(snapshot.mode);
+    typed.map_loaded = snapshot.map_loaded;
+    typed.localization_valid = snapshot.localization_valid;
+    typed.map_directory = snapshot.active_map_directory;
+    typed.error = snapshot.last_error;
+    state_typed_pub_->publish(typed);
   }
 
   void completeRelocalization() {
@@ -227,26 +243,33 @@ class SystemModeManagerNode final : public rclcpp::Node {
     }
   }
 
-  void handleLocalizationQuality(const std::string& report) {
+  void handleLocalizationHealth(
+      const slam_system_interfaces::msg::LocalizationHealth& report) {
     RawLocalizationQuality raw;
-    if (report.rfind("quality=good", 0) == 0) {
+    if (report.state == slam_system_interfaces::msg::LocalizationHealth::GOOD) {
       raw = RawLocalizationQuality::kGood;
-    } else if (report.rfind("quality=suspected", 0) == 0) {
+    } else if (report.state == slam_system_interfaces::msg::LocalizationHealth::SUSPECTED) {
       raw = RawLocalizationQuality::kSuspected;
-    } else if (report.rfind("quality=bad", 0) == 0) {
+    } else if (report.state == slam_system_interfaces::msg::LocalizationHealth::BAD) {
       raw = RawLocalizationQuality::kBad;
     } else {
-      RCLCPP_WARN(get_logger(), "Ignoring malformed localization quality: %s", report.c_str());
+      RCLCPP_WARN(get_logger(), "Ignoring invalid localization health state: %u", report.state);
       return;
     }
+    std::ostringstream details;
+    details << "typed health=" << static_cast<int>(report.state)
+            << " effective_features=" << report.effective_features
+            << " mean_residual_m=" << report.mean_residual_m
+            << " queue_delay_ms=" << report.queue_delay_ms;
+    if (!report.reason.empty()) details << " reason=" << report.reason;
 
     const auto health = quality_monitor_.update(raw);
     if (recovery_pending_ || recovery_confirmation_required_) return;
     if (health == LocalizationHealth::kBad) {
-      beginRecovery(report);
+      beginRecovery(details.str());
     } else if (health == LocalizationHealth::kSuspected) {
       recovery_status_ = "suspected";
-      recovery_reason_ = report;
+      recovery_reason_ = details.str();
       publishRecoveryState();
     } else if (recovery_status_ == "suspected") {
       recovery_status_ = "normal";
@@ -290,6 +313,26 @@ class SystemModeManagerNode final : public rclcpp::Node {
     std_msgs::msg::String message;
     message.data = recoveryDescription();
     recovery_pub_->publish(message);
+    slam_system_interfaces::msg::RecoveryStatus typed;
+    if (recovery_status_ == "normal") {
+      typed.state = slam_system_interfaces::msg::RecoveryStatus::NORMAL;
+    } else if (recovery_status_ == "suspected") {
+      typed.state = slam_system_interfaces::msg::RecoveryStatus::SUSPECTED;
+    } else if (recovery_status_ == "recovering") {
+      typed.state = slam_system_interfaces::msg::RecoveryStatus::RECOVERING;
+    } else if (recovery_status_ == "operator_assistance_required") {
+      typed.state =
+          slam_system_interfaces::msg::RecoveryStatus::OPERATOR_ASSISTANCE_REQUIRED;
+    } else {
+      typed.state =
+          slam_system_interfaces::msg::RecoveryStatus::RECOVERED_WAITING_CONFIRMATION;
+    }
+    const bool normal = typed.state == slam_system_interfaces::msg::RecoveryStatus::NORMAL;
+    typed.motion_allowed = true;
+    typed.map_writes_allowed = normal && !recovery_confirmation_required_;
+    typed.autonomy_allowed = normal && !recovery_confirmation_required_;
+    typed.reason = recovery_reason_;
+    recovery_typed_pub_->publish(typed);
   }
 
   void failActiveMode(const std::string& error) {
@@ -314,12 +357,16 @@ class SystemModeManagerNode final : public rclcpp::Node {
   LocalizationQualityMonitor quality_monitor_;
   std::string map_directory_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
+  rclcpp::Publisher<slam_system_interfaces::msg::SystemMode>::SharedPtr state_typed_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr relocalization_state_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mapping_result_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr lidar_recovery_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr localization_quality_sub_;
+  rclcpp::Subscription<slam_system_interfaces::msg::LocalizationHealth>::SharedPtr
+      localization_health_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr relocalization_recovery_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recovery_pub_;
+  rclcpp::Publisher<slam_system_interfaces::msg::RecoveryStatus>::SharedPtr
+      recovery_typed_pub_;
   rclcpp::TimerBase::SharedPtr exit_completion_timer_;
   rclcpp::Service<Trigger>::SharedPtr enter_mapping_;
   rclcpp::Service<Trigger>::SharedPtr enter_incremental_mapping_;

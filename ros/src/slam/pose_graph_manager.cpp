@@ -184,12 +184,13 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
 
   sub_save_flag_ = this->create_subscription<std_msgs::msg::String>(
       "save_dir", 1, std::bind(&PoseGraphManager::saveFlagCallback, this, std::placeholders::_1));
-  sub_recovery_status_ = this->create_subscription<std_msgs::msg::String>(
-      "/recovery/status", rclcpp::QoS(1).reliable().transient_local(),
+  sub_recovery_status_ =
+      this->create_subscription<slam_system_interfaces::msg::RecoveryStatus>(
+      "/recovery/state", rclcpp::QoS(1).reliable().transient_local(),
       std::bind(&PoseGraphManager::recoveryStatusCallback, this, std::placeholders::_1));
   if (mode_control_enabled_) {
-    sub_system_mode_ = this->create_subscription<std_msgs::msg::String>(
-        "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
+    sub_system_mode_ = this->create_subscription<slam_system_interfaces::msg::SystemMode>(
+        "/system_mode/state", rclcpp::QoS(1).reliable().transient_local(),
         std::bind(&PoseGraphManager::modeCallback, this, std::placeholders::_1));
   }
   if (gps_altitude_manager_->enabled()) {
@@ -367,21 +368,23 @@ void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPt
 }
 
 void PoseGraphManager::recoveryStatusCallback(
-    const std_msgs::msg::String::ConstSharedPtr &message) {
-  const bool allowed = message->data.find("map_writes_allowed=true") != std::string::npos;
+    const slam_system_interfaces::msg::RecoveryStatus::ConstSharedPtr &message) {
+  const bool allowed = message->map_writes_allowed;
   const bool previously_allowed = recovery_allows_map_writes_.exchange(allowed);
   if (previously_allowed && !allowed) {
     RCLCPP_WARN(get_logger(), "Map writes paused by localization health: %s",
-                message->data.c_str());
+                message->reason.c_str());
   } else if (!previously_allowed && allowed) {
     RCLCPP_INFO(get_logger(), "Map writes resumed after localization recovery");
   }
 }
 
-void PoseGraphManager::modeCallback(const std_msgs::msg::String::ConstSharedPtr &message) {
-  const bool mapping = message->data.rfind("mode=mapping", 0) == 0;
-  const bool incremental = message->data.rfind("mode=incremental_mapping", 0) == 0;
-  const bool exiting = message->data.rfind("mode=exiting", 0) == 0;
+void PoseGraphManager::modeCallback(
+    const slam_system_interfaces::msg::SystemMode::ConstSharedPtr &message) {
+  const bool mapping = message->mode == slam_system_interfaces::msg::SystemMode::MAPPING;
+  const bool incremental =
+      message->mode == slam_system_interfaces::msg::SystemMode::INCREMENTAL_MAPPING;
+  const bool exiting = message->mode == slam_system_interfaces::msg::SystemMode::EXITING;
   const bool was_mapping_active = mapping_active_.exchange(false);
   incremental_mapping_active_ = false;
 

@@ -19,6 +19,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <slam_system_interfaces/msg/system_mode.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "kiss_matcher_slam/core/map_product_loader.hpp"
@@ -117,8 +118,8 @@ class MapRelocalizer final : public rclcpp::Node {
                    "Relocalization timed out; keep manual motion enabled and return to a known area or viewpoint");
     });
     if (mode_control_enabled_) {
-      mode_sub_ = create_subscription<std_msgs::msg::String>(
-          "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
+      mode_sub_ = create_subscription<slam_system_interfaces::msg::SystemMode>(
+          "/system_mode/state", rclcpp::QoS(1).reliable().transient_local(),
           std::bind(&MapRelocalizer::modeCallback, this, std::placeholders::_1));
     } else {
       relocalization_active_ = true;
@@ -134,11 +135,12 @@ class MapRelocalizer final : public rclcpp::Node {
   }
 
  private:
-  void modeCallback(const std_msgs::msg::String::ConstSharedPtr message) {
-    const bool requested = message->data.rfind("mode=relocalization", 0) == 0;
-    normal_mode_active_ = message->data.rfind("mode=normal", 0) == 0;
+  void modeCallback(const slam_system_interfaces::msg::SystemMode::ConstSharedPtr message) {
+    const bool requested =
+        message->mode == slam_system_interfaces::msg::SystemMode::RELOCALIZATION;
+    normal_mode_active_ = message->mode == slam_system_interfaces::msg::SystemMode::NORMAL;
     incremental_mapping_active_ =
-        message->data.rfind("mode=incremental_mapping", 0) == 0;
+        message->mode == slam_system_interfaces::msg::SystemMode::INCREMENTAL_MAPPING;
     if (requested && !relocalization_active_) {
       localized_ = false;
       have_tentative_ = false;
@@ -283,7 +285,7 @@ class MapRelocalizer final : public rclcpp::Node {
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localized_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recovery_status_pub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_sub_;
+  rclcpp::Subscription<slam_system_interfaces::msg::SystemMode>::SharedPtr mode_sub_;
   rclcpp::TimerBase::SharedPtr recovery_watchdog_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> cloud_sub_;

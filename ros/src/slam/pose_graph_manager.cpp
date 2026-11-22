@@ -149,58 +149,7 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   scan_context_detector_ =
       std::make_unique<kiss_matcher_slam::ScanContextLoopDetector>(scan_context_config);
 
-  // NOTE(hlim): To make this node compatible with being launched under different namespaces,
-  // I deliberately avoided adding a '/' in front of the topic names.
-  path_pub_           = this->create_publisher<nav_msgs::msg::Path>("path/original", qos);
-  corrected_path_pub_ = this->create_publisher<nav_msgs::msg::Path>("path/corrected", qos);
-  map_pub_            = this->create_publisher<sensor_msgs::msg::PointCloud2>("global_map", qos);
-  scan_pub_           = this->create_publisher<sensor_msgs::msg::PointCloud2>("curr_scan", qos);
-  loop_detection_pub_ =
-      this->create_publisher<visualization_msgs::msg::Marker>("loop_detection", qos);
-  loop_detection_radius_pub_ =
-      this->create_publisher<visualization_msgs::msg::Marker>("loop_detection_radius", qos);
-
-  realtime_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("pose_stamped", qos);
-  optimized_odom_pub_ =
-      this->create_publisher<nav_msgs::msg::Odometry>("odometry/optimized", qos);
-  debug_src_pub_     = this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/src", qos);
-  debug_tgt_pub_     = this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/tgt", qos);
-  debug_coarse_aligned_pub_ =
-      this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/coarse_alignment", qos);
-  debug_fine_aligned_pub_ =
-      this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/fine_alignment", qos);
-  debug_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/debug_cloud", qos);
-  mode_result_pub_ = this->create_publisher<std_msgs::msg::String>(
-      "/mapping/mode_result", rclcpp::QoS(1).reliable().transient_local());
-  mode_result_typed_pub_ =
-      this->create_publisher<slam_system_interfaces::msg::MappingModeResult>(
-          "/mapping/mode_state", rclcpp::QoS(1).reliable().transient_local());
-
-  sub_odom_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this, "/odom");
-  sub_scan_ =
-      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(this, "/cloud");
-
-  sub_node_ = std::make_shared<message_filters::Synchronizer<NodeSyncPolicy>>(
-      NodeSyncPolicy(10), *sub_odom_, *sub_scan_);
-  sub_node_->registerCallback(std::bind(
-      &PoseGraphManager::callbackNode, this, std::placeholders::_1, std::placeholders::_2));
-
-  sub_save_flag_ = this->create_subscription<std_msgs::msg::String>(
-      "save_dir", 1, std::bind(&PoseGraphManager::saveFlagCallback, this, std::placeholders::_1));
-  sub_recovery_status_ =
-      this->create_subscription<slam_system_interfaces::msg::RecoveryStatus>(
-      "/recovery/state", rclcpp::QoS(1).reliable().transient_local(),
-      std::bind(&PoseGraphManager::recoveryStatusCallback, this, std::placeholders::_1));
-  if (mode_control_enabled_) {
-    sub_system_mode_ = this->create_subscription<slam_system_interfaces::msg::SystemMode>(
-        "/system_mode/state", rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&PoseGraphManager::modeCallback, this, std::placeholders::_1));
-  }
-  if (gps_altitude_manager_->enabled()) {
-    sub_gps_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-        "gps/fix", rclcpp::SensorDataQoS(),
-        std::bind(&PoseGraphManager::gpsCallback, this, std::placeholders::_1));
-  }
+  initializeRosInterfaces(qos);
 
   kiss_matcher_slam::MapProductConfig product_config;
   product_config.output_directory = output_directory_;
@@ -225,30 +174,8 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   map_builder_config.keyframe_clouds_are_voxelized = store_voxelized_scan_;
   map_builder_ =
       std::make_unique<kiss_matcher_slam::IncrementalMapBuilder>(map_builder_config);
-  map_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / map_update_hz),
-                                       std::bind(&PoseGraphManager::buildMap, this));
-
-  scan_context_timer_ =
-      this->create_wall_timer(std::chrono::duration<double>(1.0 / loop_detector_hz),
-                              std::bind(&PoseGraphManager::detectLoopClosureByScanContext, this));
-
-  if (enable_loop_nnsearch) {
-    loop_nnsearch_timer_ =
-        this->create_wall_timer(std::chrono::duration<double>(1.0 / loop_nnsearch_hz),
-                                std::bind(&PoseGraphManager::detectLoopClosureByNNSearch, this));
-  }
-
-  graph_vis_timer_ =
-      this->create_wall_timer(std::chrono::duration<double>(1.0 / vis_hz),
-                              std::bind(&PoseGraphManager::visualizePoseGraph, this));
-
-  lc_reg_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / 100.0),
-                                          std::bind(&PoseGraphManager::performRegistration, this));
-
-  // 20 Hz is enough as long as it's faster than the full registration process.
-  lc_vis_timer_ =
-      this->create_wall_timer(std::chrono::duration<double>(1.0 / 20.0),
-                              std::bind(&PoseGraphManager::visualizeLoopClosureClouds, this));
+  initializeTimers(map_update_hz, loop_detector_hz, enable_loop_nnsearch,
+                   loop_nnsearch_hz, vis_hz);
 
   if (!lc_config.is_multilayer_env_) {
     RCLCPP_WARN(
@@ -259,6 +186,90 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
         "consider setting it to true to enable full 3D NN search for loop candidates.");
   }
   RCLCPP_INFO(this->get_logger(), "Main class, starting node...");
+}
+
+void PoseGraphManager::initializeRosInterfaces(const rclcpp::QoS &latched_qos) {
+  // Relative data topics remain namespace-friendly. System-wide control topics
+  // intentionally use absolute names until the compatibility migration ends.
+  path_pub_ = create_publisher<nav_msgs::msg::Path>("path/original", latched_qos);
+  corrected_path_pub_ =
+      create_publisher<nav_msgs::msg::Path>("path/corrected", latched_qos);
+  map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("global_map", latched_qos);
+  scan_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("curr_scan", latched_qos);
+  loop_detection_pub_ =
+      create_publisher<visualization_msgs::msg::Marker>("loop_detection", latched_qos);
+  loop_detection_radius_pub_ = create_publisher<visualization_msgs::msg::Marker>(
+      "loop_detection_radius", latched_qos);
+  realtime_pose_pub_ =
+      create_publisher<geometry_msgs::msg::PoseStamped>("pose_stamped", latched_qos);
+  optimized_odom_pub_ =
+      create_publisher<nav_msgs::msg::Odometry>("odometry/optimized", latched_qos);
+  debug_src_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("lc/src", latched_qos);
+  debug_tgt_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("lc/tgt", latched_qos);
+  debug_coarse_aligned_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      "lc/coarse_alignment", latched_qos);
+  debug_fine_aligned_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      "lc/fine_alignment", latched_qos);
+  debug_cloud_pub_ =
+      create_publisher<sensor_msgs::msg::PointCloud2>("lc/debug_cloud", latched_qos);
+
+  const auto control_qos = rclcpp::QoS(1).reliable().transient_local();
+  mode_result_pub_ =
+      create_publisher<std_msgs::msg::String>("/mapping/mode_result", control_qos);
+  mode_result_typed_pub_ = create_publisher<slam_system_interfaces::msg::MappingModeResult>(
+      "/mapping/mode_state", control_qos);
+
+  sub_odom_ =
+      std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this, "/odom");
+  sub_scan_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
+      this, "/cloud");
+  sub_node_ = std::make_shared<message_filters::Synchronizer<NodeSyncPolicy>>(
+      NodeSyncPolicy(10), *sub_odom_, *sub_scan_);
+  sub_node_->registerCallback(std::bind(
+      &PoseGraphManager::callbackNode, this, std::placeholders::_1, std::placeholders::_2));
+
+  sub_save_flag_ = create_subscription<std_msgs::msg::String>(
+      "save_dir", 1,
+      std::bind(&PoseGraphManager::saveFlagCallback, this, std::placeholders::_1));
+  sub_recovery_status_ = create_subscription<slam_system_interfaces::msg::RecoveryStatus>(
+      "/recovery/state", control_qos,
+      std::bind(&PoseGraphManager::recoveryStatusCallback, this, std::placeholders::_1));
+  if (mode_control_enabled_) {
+    sub_system_mode_ = create_subscription<slam_system_interfaces::msg::SystemMode>(
+        "/system_mode/state", control_qos,
+        std::bind(&PoseGraphManager::modeCallback, this, std::placeholders::_1));
+  }
+  if (gps_altitude_manager_->enabled()) {
+    sub_gps_ = create_subscription<sensor_msgs::msg::NavSatFix>(
+        "gps/fix", rclcpp::SensorDataQoS(),
+        std::bind(&PoseGraphManager::gpsCallback, this, std::placeholders::_1));
+  }
+}
+
+void PoseGraphManager::initializeTimers(const double map_update_hz,
+                                        const double loop_detector_hz,
+                                        const bool enable_loop_nnsearch,
+                                        const double loop_nnsearch_hz,
+                                        const double visualization_hz) {
+  map_timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / map_update_hz),
+                                 std::bind(&PoseGraphManager::buildMap, this));
+  scan_context_timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / loop_detector_hz),
+      std::bind(&PoseGraphManager::detectLoopClosureByScanContext, this));
+  if (enable_loop_nnsearch) {
+    loop_nnsearch_timer_ = create_wall_timer(
+        std::chrono::duration<double>(1.0 / loop_nnsearch_hz),
+        std::bind(&PoseGraphManager::detectLoopClosureByNNSearch, this));
+  }
+  graph_vis_timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / visualization_hz),
+      std::bind(&PoseGraphManager::visualizePoseGraph, this));
+  lc_reg_timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / 100.0),
+                                    std::bind(&PoseGraphManager::performRegistration, this));
+  // 20 Hz is enough as long as it is faster than the full registration process.
+  lc_vis_timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / 20.0),
+      std::bind(&PoseGraphManager::visualizeLoopClosureClouds, this));
 }
 
 PoseGraphManager::~PoseGraphManager() {

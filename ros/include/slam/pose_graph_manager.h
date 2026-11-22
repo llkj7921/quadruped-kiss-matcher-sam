@@ -72,6 +72,13 @@ class PoseGraphManager : public rclcpp::Node {
   ~PoseGraphManager();
 
  private:
+  void initializeRosInterfaces(const rclcpp::QoS &latched_qos);
+  void initializeTimers(double map_update_hz,
+                        double loop_detector_hz,
+                        bool enable_loop_nnsearch,
+                        double loop_nnsearch_hz,
+                        double visualization_hz);
+
   void appendKeyframePose(const kiss_matcher::PoseGraphNode &node);
 
   void callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,

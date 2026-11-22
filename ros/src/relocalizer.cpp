@@ -20,6 +20,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <slam_system_interfaces/msg/system_mode.hpp>
+#include <slam_system_interfaces/msg/relocalization_status.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "kiss_matcher_slam/core/map_product_loader.hpp"
@@ -107,6 +108,9 @@ class MapRelocalizer final : public rclcpp::Node {
         "/relocalization/localized", rclcpp::QoS(1).reliable().transient_local());
     recovery_status_pub_ = create_publisher<std_msgs::msg::String>(
         "/relocalization/recovery_status", rclcpp::QoS(1).reliable().transient_local());
+    relocalization_status_pub_ =
+        create_publisher<slam_system_interfaces::msg::RelocalizationStatus>(
+            "/relocalization/status", rclcpp::QoS(1).reliable().transient_local());
     recovery_watchdog_ = create_wall_timer(std::chrono::milliseconds(500), [this]() {
       if (!relocalization_active_ || assistance_published_) return;
       if (now().seconds() - relocalization_start_s_ < recovery_timeout_s_) return;
@@ -114,6 +118,11 @@ class MapRelocalizer final : public rclcpp::Node {
       std_msgs::msg::String status;
       status.data = "operator_assistance_required";
       recovery_status_pub_->publish(status);
+      slam_system_interfaces::msg::RelocalizationStatus typed;
+      typed.state =
+          slam_system_interfaces::msg::RelocalizationStatus::OPERATOR_ASSISTANCE_REQUIRED;
+      typed.reason = "relocalization timed out; return to a known area or viewpoint";
+      relocalization_status_pub_->publish(typed);
       RCLCPP_ERROR(get_logger(),
                    "Relocalization timed out; keep manual motion enabled and return to a known area or viewpoint");
     });
@@ -148,6 +157,10 @@ class MapRelocalizer final : public rclcpp::Node {
       last_query_stamp_ = -std::numeric_limits<double>::infinity();
       relocalization_start_s_ = now().seconds();
       assistance_published_ = false;
+      slam_system_interfaces::msg::RelocalizationStatus status;
+      status.state = slam_system_interfaces::msg::RelocalizationStatus::SEARCHING;
+      status.reason = "relocalization mode activated";
+      relocalization_status_pub_->publish(status);
       RCLCPP_INFO(get_logger(), "Relocalization mode activated");
     }
     relocalization_active_ = requested;
@@ -248,6 +261,10 @@ class MapRelocalizer final : public rclcpp::Node {
         std_msgs::msg::Bool state;
         state.data = true;
         localized_pub_->publish(state);
+        slam_system_interfaces::msg::RelocalizationStatus status;
+        status.state = slam_system_interfaces::msg::RelocalizationStatus::LOCALIZED;
+        status.reason = "geometric verification confirmed";
+        relocalization_status_pub_->publish(status);
       }
       return;
     }
@@ -285,6 +302,8 @@ class MapRelocalizer final : public rclcpp::Node {
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localized_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recovery_status_pub_;
+  rclcpp::Publisher<slam_system_interfaces::msg::RelocalizationStatus>::SharedPtr
+      relocalization_status_pub_;
   rclcpp::Subscription<slam_system_interfaces::msg::SystemMode>::SharedPtr mode_sub_;
   rclcpp::TimerBase::SharedPtr recovery_watchdog_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;

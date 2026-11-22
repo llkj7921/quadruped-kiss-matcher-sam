@@ -172,6 +172,9 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   debug_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/debug_cloud", qos);
   mode_result_pub_ = this->create_publisher<std_msgs::msg::String>(
       "/mapping/mode_result", rclcpp::QoS(1).reliable().transient_local());
+  mode_result_typed_pub_ =
+      this->create_publisher<slam_system_interfaces::msg::MappingModeResult>(
+          "/mapping/mode_state", rclcpp::QoS(1).reliable().transient_local());
 
   sub_odom_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this, "/odom");
   sub_scan_ =
@@ -394,13 +397,9 @@ void PoseGraphManager::modeCallback(
       if (save_map_pcd_ && !map_database_.empty()) {
         map_product_writer_->writeMap(map_database_.snapshot(), true);
       }
-      std_msgs::msg::String result;
-      result.data = "ready:exited";
-      mode_result_pub_->publish(result);
+      publishModeResult(slam_system_interfaces::msg::MappingModeResult::READY_EXITED);
     } catch (const std::exception &error) {
-      std_msgs::msg::String result;
-      result.data = std::string("error:") + error.what();
-      mode_result_pub_->publish(result);
+      publishModeResult(slam_system_interfaces::msg::MappingModeResult::ERROR, error.what());
     }
     return;
   }
@@ -408,15 +407,13 @@ void PoseGraphManager::modeCallback(
   if (mapping) {
     if (!map_database_.empty()) {
       RCLCPP_ERROR(get_logger(), "A mapping session already exists; restart the node for a new map");
-      std_msgs::msg::String result;
-      result.data = "error:a mapping session already exists; restart the node for a new map";
-      mode_result_pub_->publish(result);
+      publishModeResult(
+          slam_system_interfaces::msg::MappingModeResult::ERROR,
+          "a mapping session already exists; restart the node for a new map");
       return;
     }
     mapping_active_ = true;
-    std_msgs::msg::String result;
-    result.data = "ready:mapping";
-    mode_result_pub_->publish(result);
+    publishModeResult(slam_system_interfaces::msg::MappingModeResult::READY_MAPPING);
     return;
   }
   if (!incremental) return;
@@ -440,15 +437,32 @@ void PoseGraphManager::modeCallback(
     }
     incremental_mapping_active_ = true;
     mapping_active_ = true;
-    std_msgs::msg::String result;
-    result.data = "ready:incremental_mapping";
-    mode_result_pub_->publish(result);
+    publishModeResult(
+        slam_system_interfaces::msg::MappingModeResult::READY_INCREMENTAL_MAPPING);
   } catch (const std::exception &error) {
     RCLCPP_ERROR(get_logger(), "Cannot enter incremental mapping: %s", error.what());
-    std_msgs::msg::String result;
-    result.data = std::string("error:") + error.what();
-    mode_result_pub_->publish(result);
+    publishModeResult(slam_system_interfaces::msg::MappingModeResult::ERROR, error.what());
   }
+}
+
+void PoseGraphManager::publishModeResult(const uint8_t state, const std::string &error) {
+  slam_system_interfaces::msg::MappingModeResult typed;
+  typed.state = state;
+  typed.error = error;
+  mode_result_typed_pub_->publish(typed);
+
+  std_msgs::msg::String legacy;
+  if (state == slam_system_interfaces::msg::MappingModeResult::READY_MAPPING) {
+    legacy.data = "ready:mapping";
+  } else if (state ==
+             slam_system_interfaces::msg::MappingModeResult::READY_INCREMENTAL_MAPPING) {
+    legacy.data = "ready:incremental_mapping";
+  } else if (state == slam_system_interfaces::msg::MappingModeResult::READY_EXITED) {
+    legacy.data = "ready:exited";
+  } else {
+    legacy.data = "error:" + error;
+  }
+  mode_result_pub_->publish(legacy);
 }
 
 nav_msgs::msg::Odometry PoseGraphManager::odometryInMap(

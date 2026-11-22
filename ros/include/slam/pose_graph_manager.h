@@ -23,6 +23,7 @@
 #include <std_msgs/msg/header.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <slam_system_interfaces/msg/recovery_status.hpp>
+#include <slam_system_interfaces/msg/mapping_mode_result.hpp>
 #include <slam_system_interfaces/msg/system_mode.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -78,6 +79,7 @@ class PoseGraphManager : public rclcpp::Node {
   void modeCallback(const slam_system_interfaces::msg::SystemMode::ConstSharedPtr &message);
   void recoveryStatusCallback(
       const slam_system_interfaces::msg::RecoveryStatus::ConstSharedPtr &message);
+  void publishModeResult(uint8_t state, const std::string &error = "");
   nav_msgs::msg::Odometry odometryInMap(const nav_msgs::msg::Odometry &odom) const;
   void buildMap();
   void detectLoopClosureByScanContext();
@@ -169,6 +171,8 @@ class PoseGraphManager : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_fine_aligned_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_cloud_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mode_result_pub_;
+  rclcpp::Publisher<slam_system_interfaces::msg::MappingModeResult>::SharedPtr
+      mode_result_typed_pub_;
 
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_save_flag_;
   rclcpp::Subscription<slam_system_interfaces::msg::SystemMode>::SharedPtr sub_system_mode_;

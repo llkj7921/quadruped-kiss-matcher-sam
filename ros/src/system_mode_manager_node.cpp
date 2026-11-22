@@ -8,7 +8,10 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <slam_system_interfaces/msg/localization_health.hpp>
+#include <slam_system_interfaces/msg/lidar_stream_status.hpp>
+#include <slam_system_interfaces/msg/mapping_mode_result.hpp>
 #include <slam_system_interfaces/msg/recovery_status.hpp>
+#include <slam_system_interfaces/msg/relocalization_status.hpp>
 #include <slam_system_interfaces/msg/system_mode.hpp>
 
 #include "kiss_matcher_slam/core/system_mode_manager.hpp"
@@ -31,33 +34,39 @@ class SystemModeManagerNode final : public rclcpp::Node {
         [this](const std_msgs::msg::Bool::ConstSharedPtr message) {
           if (message->data) completeRelocalization();
         });
-    mapping_result_sub_ = create_subscription<std_msgs::msg::String>(
-        "mapping/mode_result", rclcpp::QoS(1).reliable().transient_local(),
-        [this](const std_msgs::msg::String::ConstSharedPtr message) {
-          if (message->data.rfind("error:", 0) == 0) {
-            const auto error = message->data.substr(6);
+    mapping_result_sub_ =
+        create_subscription<slam_system_interfaces::msg::MappingModeResult>(
+        "/mapping/mode_state", rclcpp::QoS(1).reliable().transient_local(),
+        [this](const slam_system_interfaces::msg::MappingModeResult::ConstSharedPtr message) {
+          if (message->state == slam_system_interfaces::msg::MappingModeResult::ERROR) {
             if (manager_.snapshot().mode == SystemMode::kExiting) {
-              manager_.completeExit(false, error);
+              manager_.completeExit(false, message->error);
               publishState();
             } else {
-              failActiveMode(error);
+              failActiveMode(message->error);
             }
-          } else if (message->data == "ready:exited" &&
+          } else if (message->state ==
+                         slam_system_interfaces::msg::MappingModeResult::READY_EXITED &&
                      manager_.snapshot().mode == SystemMode::kExiting) {
             manager_.completeExit(true);
             publishState();
             if (recovery_pending_) enterRecoveryRelocalization();
           }
         });
-    lidar_recovery_sub_ = create_subscription<std_msgs::msg::String>(
-        "/recovery/lidar_status", rclcpp::QoS(1).reliable().transient_local(),
-        [this](const std_msgs::msg::String::ConstSharedPtr message) {
-          if (message->data.rfind("recovering", 0) == 0) {
-            beginRecovery(message->data);
-          } else if (message->data.rfind("degraded", 0) == 0 && !recovery_pending_) {
+    lidar_recovery_sub_ =
+        create_subscription<slam_system_interfaces::msg::LidarStreamStatus>(
+        "/lidar/stream_status", rclcpp::QoS(1).reliable().transient_local(),
+        [this](const slam_system_interfaces::msg::LidarStreamStatus::ConstSharedPtr message) {
+          std::ostringstream details;
+          details << message->reason << " gap_s=" << message->gap_seconds;
+          if (message->state == slam_system_interfaces::msg::LidarStreamStatus::RECOVERING) {
+            beginRecovery(details.str());
+          } else if (message->state ==
+                         slam_system_interfaces::msg::LidarStreamStatus::DEGRADED &&
+                     !recovery_pending_) {
             quality_monitor_.markSuspected();
             recovery_status_ = "suspected";
-            recovery_reason_ = message->data;
+            recovery_reason_ = details.str();
             publishRecoveryState();
           }
         });
@@ -67,11 +76,14 @@ class SystemModeManagerNode final : public rclcpp::Node {
             [this](const slam_system_interfaces::msg::LocalizationHealth::ConstSharedPtr message) {
               handleLocalizationHealth(*message);
             });
-    relocalization_recovery_sub_ = create_subscription<std_msgs::msg::String>(
-        "/relocalization/recovery_status", rclcpp::QoS(1).reliable().transient_local(),
-        [this](const std_msgs::msg::String::ConstSharedPtr message) {
-          if (recovery_pending_ && message->data == "operator_assistance_required") {
-            recovery_status_ = message->data;
+    relocalization_recovery_sub_ =
+        create_subscription<slam_system_interfaces::msg::RelocalizationStatus>(
+        "/relocalization/status", rclcpp::QoS(1).reliable().transient_local(),
+        [this](const slam_system_interfaces::msg::RelocalizationStatus::ConstSharedPtr message) {
+          if (recovery_pending_ && message->state ==
+              slam_system_interfaces::msg::RelocalizationStatus::OPERATOR_ASSISTANCE_REQUIRED) {
+            recovery_status_ = "operator_assistance_required";
+            recovery_reason_ = message->reason;
             publishRecoveryState();
           }
         });
@@ -359,11 +371,14 @@ class SystemModeManagerNode final : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
   rclcpp::Publisher<slam_system_interfaces::msg::SystemMode>::SharedPtr state_typed_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr relocalization_state_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mapping_result_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr lidar_recovery_sub_;
+  rclcpp::Subscription<slam_system_interfaces::msg::MappingModeResult>::SharedPtr
+      mapping_result_sub_;
+  rclcpp::Subscription<slam_system_interfaces::msg::LidarStreamStatus>::SharedPtr
+      lidar_recovery_sub_;
   rclcpp::Subscription<slam_system_interfaces::msg::LocalizationHealth>::SharedPtr
       localization_health_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr relocalization_recovery_sub_;
+  rclcpp::Subscription<slam_system_interfaces::msg::RelocalizationStatus>::SharedPtr
+      relocalization_recovery_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recovery_pub_;
   rclcpp::Publisher<slam_system_interfaces::msg::RecoveryStatus>::SharedPtr
       recovery_typed_pub_;

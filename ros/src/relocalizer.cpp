@@ -58,8 +58,10 @@ class MapRelocalizer final : public rclcpp::Node {
     confirmation_rotation_rad_ =
         declare_parameter<double>("confirmation_rotation_deg", 15.0) * M_PI / 180.0;
     recovery_timeout_s_ = declare_parameter<double>("recovery_timeout_s", 10.0);
-    if (map_directory.empty() || query_period_s <= 0.0 || required_confirmations_ <= 0 ||
-        confirmation_translation_m_ <= 0.0 || confirmation_rotation_rad_ <= 0.0 ||
+    if (map_directory.empty() || !std::isfinite(query_period_s) || query_period_s <= 0.0 ||
+        required_confirmations_ <= 0 || !std::isfinite(confirmation_translation_m_) ||
+        confirmation_translation_m_ <= 0.0 || !std::isfinite(confirmation_rotation_rad_) ||
+        confirmation_rotation_rad_ <= 0.0 || !std::isfinite(recovery_timeout_s_) ||
         recovery_timeout_s_ <= 0.0 ||
         !kiss_matcher_slam::distinctMapAndOdometryFrames(map_frame_, odom_frame_)) {
       throw std::invalid_argument("invalid relocalization configuration");
@@ -101,6 +103,18 @@ class MapRelocalizer final : public rclcpp::Node {
         declare_parameter<double>("local_reg.scale_factor_for_corr_dist", 5.0);
     registration.gicp_config_.overlap_threshold_ =
         declare_parameter<double>("local_reg.overlap_threshold", 55.0);
+    if (!std::isfinite(scan_context.max_radius_m) || scan_context.max_radius_m <= 0.0 ||
+        !std::isfinite(scan_context.distance_threshold) ||
+        scan_context.distance_threshold <= 0.0 ||
+        !std::isfinite(scan_context.sector_search_ratio) ||
+        scan_context.sector_search_ratio <= 0.0 ||
+        !std::isfinite(registration.voxel_res_) || registration.voxel_res_ <= 0.0 ||
+        !std::isfinite(registration.gicp_config_.scale_factor_for_corr_dist_) ||
+        registration.gicp_config_.scale_factor_for_corr_dist_ <= 0.0 ||
+        !std::isfinite(registration.gicp_config_.overlap_threshold_) ||
+        registration.gicp_config_.overlap_threshold_ <= 0.0) {
+      throw std::invalid_argument("floating-point relocalization parameters must be finite and positive");
+    }
     registration_ = std::make_unique<kiss_matcher::LoopClosure>(registration, get_logger());
     voxel_resolution_ = registration.voxel_res_;
     submap_keyframes_ = registration.num_submap_keyframes_;

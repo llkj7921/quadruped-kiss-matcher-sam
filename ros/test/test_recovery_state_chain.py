@@ -8,7 +8,12 @@ import pytest
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from slam_system_interfaces.msg import LocalizationHealth, RecoveryStatus, SystemMode
+from slam_system_interfaces.msg import (
+    LocalizationHealth,
+    RecoveryStatus,
+    RelocalizationStatus,
+    SystemMode,
+)
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
 
@@ -58,8 +63,8 @@ class TestRecoveryStateChain(unittest.TestCase):
         self.health_pub = self.node.create_publisher(
             LocalizationHealth, "/localization/health", self.latched_qos
         )
-        self.localized_pub = self.node.create_publisher(
-            Bool, "/relocalization/localized", self.latched_qos
+        self.relocalization_status_pub = self.node.create_publisher(
+            RelocalizationStatus, "/relocalization/status", self.latched_qos
         )
         self.recovery_sub = self.node.create_subscription(
             RecoveryStatus,
@@ -127,9 +132,10 @@ class TestRecoveryStateChain(unittest.TestCase):
             and self.map_updates_allowed is False
         )
 
-        localized = Bool()
-        localized.data = True
-        self.localized_pub.publish(localized)
+        localized = RelocalizationStatus()
+        localized.state = RelocalizationStatus.LOCALIZED
+        localized.reason = "integration test relocalization confirmed"
+        self.relocalization_status_pub.publish(localized)
         self.spin_until(
             lambda: self.recovery.state
             == RecoveryStatus.RECOVERED_WAITING_CONFIRMATION

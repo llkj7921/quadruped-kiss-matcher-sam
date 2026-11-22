@@ -29,11 +29,6 @@ class SystemModeManagerNode final : public rclcpp::Node {
         "system_mode", rclcpp::QoS(1).reliable().transient_local());
     state_typed_pub_ = create_publisher<slam_system_interfaces::msg::SystemMode>(
         "/system_mode/state", rclcpp::QoS(1).reliable().transient_local());
-    relocalization_state_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "relocalization/localized", rclcpp::QoS(1).reliable().transient_local(),
-        [this](const std_msgs::msg::Bool::ConstSharedPtr message) {
-          if (message->data) completeRelocalization();
-        });
     mapping_result_sub_ =
         create_subscription<slam_system_interfaces::msg::MappingModeResult>(
         "/mapping/mode_state", rclcpp::QoS(1).reliable().transient_local(),
@@ -80,7 +75,9 @@ class SystemModeManagerNode final : public rclcpp::Node {
         create_subscription<slam_system_interfaces::msg::RelocalizationStatus>(
         "/relocalization/status", rclcpp::QoS(1).reliable().transient_local(),
         [this](const slam_system_interfaces::msg::RelocalizationStatus::ConstSharedPtr message) {
-          if (recovery_pending_ && message->state ==
+          if (message->state == slam_system_interfaces::msg::RelocalizationStatus::LOCALIZED) {
+            completeRelocalization();
+          } else if (recovery_pending_ && message->state ==
               slam_system_interfaces::msg::RelocalizationStatus::OPERATOR_ASSISTANCE_REQUIRED) {
             recovery_status_ = "operator_assistance_required";
             recovery_reason_ = message->reason;
@@ -370,7 +367,6 @@ class SystemModeManagerNode final : public rclcpp::Node {
   std::string map_directory_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
   rclcpp::Publisher<slam_system_interfaces::msg::SystemMode>::SharedPtr state_typed_pub_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr relocalization_state_sub_;
   rclcpp::Subscription<slam_system_interfaces::msg::MappingModeResult>::SharedPtr
       mapping_result_sub_;
   rclcpp::Subscription<slam_system_interfaces::msg::LidarStreamStatus>::SharedPtr

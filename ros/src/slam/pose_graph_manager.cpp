@@ -5,6 +5,8 @@
 #include <Eigen/Geometry>
 #include <tf2/exceptions.h>
 
+#include "kiss_matcher_slam/core/frame_and_transform_contract.hpp"
+
 using namespace kiss_matcher;
 
 PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
@@ -20,6 +22,10 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   auto &gc = lc_config.gicp_config_;
 
   map_frame_             = declare_parameter<std::string>("map_frame", "map");
+  odom_frame_            = declare_parameter<std::string>("odom_frame", "odom");
+  if (!kiss_matcher_slam::distinctMapAndOdometryFrames(map_frame_, odom_frame_)) {
+    throw std::invalid_argument("map_frame and odom_frame must be distinct and non-empty");
+  }
   base_frame_            = declare_parameter<std::string>("base_frame", "base");
   loop_detector_hz       = declare_parameter<double>("loop_detector_hz", 1.0);
   loop_nnsearch_hz       = declare_parameter<double>("loop_nnsearch_hz", 1.0);
@@ -297,6 +303,14 @@ void PoseGraphManager::appendKeyframePose(const PoseGraphNode &node) {
 void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,
                                     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &scan_msg) {
   if (!mapping_active_ || !recovery_allows_map_writes_) return;
+  if (odom_msg->header.frame_id != odom_frame_ || scan_msg->header.frame_id != odom_frame_) {
+    RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Rejecting mapping input with invalid frame contract: odom=%s cloud=%s expected=%s",
+        odom_msg->header.frame_id.c_str(), scan_msg->header.frame_id.c_str(),
+        odom_frame_.c_str());
+    return;
+  }
   const size_t latest_keyframe_idx = keyframe_processor_->nextKeyframeId();
 
   // NOTE(hlim): For clarification, 'current' refers to the real-time incoming messages,

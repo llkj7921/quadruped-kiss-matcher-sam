@@ -100,6 +100,7 @@ class PoseGraphManager : public rclcpp::Node {
   void writeTrajectoryProducts();
 
   std::string map_frame_;
+  std::string odom_frame_;
   std::string base_frame_;
   std::string seq_name_;
   std::string output_directory_;

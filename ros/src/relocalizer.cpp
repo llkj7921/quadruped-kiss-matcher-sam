@@ -22,6 +22,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "kiss_matcher_slam/core/map_product_loader.hpp"
+#include "kiss_matcher_slam/core/frame_and_transform_contract.hpp"
 #include "kiss_matcher_slam/core/scan_context_loop_detector.hpp"
 #include "slam/loop_closure.h"
 #include "slam/utils.hpp"
@@ -41,10 +42,6 @@ Eigen::Matrix4d odometryPose(const nav_msgs::msg::Odometry &msg) {
   return pose;
 }
 
-double translationDistance(const Eigen::Matrix4d &lhs, const Eigen::Matrix4d &rhs) {
-  return (lhs.block<3, 1>(0, 3) - rhs.block<3, 1>(0, 3)).norm();
-}
-
 }  // namespace
 
 class MapRelocalizer final : public rclcpp::Node {
@@ -56,9 +53,13 @@ class MapRelocalizer final : public rclcpp::Node {
     const auto query_period_s = declare_parameter<double>("query_period_s", 1.0);
     required_confirmations_ = declare_parameter<int>("required_confirmations", 2);
     confirmation_translation_m_ = declare_parameter<double>("confirmation_translation_m", 1.0);
+    confirmation_rotation_rad_ =
+        declare_parameter<double>("confirmation_rotation_deg", 15.0) * M_PI / 180.0;
     recovery_timeout_s_ = declare_parameter<double>("recovery_timeout_s", 10.0);
     if (map_directory.empty() || query_period_s <= 0.0 || required_confirmations_ <= 0 ||
-        confirmation_translation_m_ <= 0.0 || recovery_timeout_s_ <= 0.0) {
+        confirmation_translation_m_ <= 0.0 || confirmation_rotation_rad_ <= 0.0 ||
+        recovery_timeout_s_ <= 0.0 ||
+        !kiss_matcher_slam::distinctMapAndOdometryFrames(map_frame_, odom_frame_)) {
       throw std::invalid_argument("invalid relocalization configuration");
     }
     query_period_s_ = query_period_s;
@@ -221,7 +222,9 @@ class MapRelocalizer final : public rclcpp::Node {
       if (!result.is_valid_) continue;
       const Eigen::Matrix4d proposed_map_to_odom = result.pose_ * odom_pose.inverse();
       if (!have_tentative_ || candidate.keyframe_id != tentative_candidate_ ||
-          translationDistance(proposed_map_to_odom, tentative_map_to_odom_) > confirmation_translation_m_) {
+          !kiss_matcher_slam::transformsConsistent(
+              proposed_map_to_odom, tentative_map_to_odom_,
+              confirmation_translation_m_, confirmation_rotation_rad_)) {
         tentative_candidate_ = candidate.keyframe_id;
         tentative_map_to_odom_ = proposed_map_to_odom;
         confirmations_ = 1;
@@ -258,6 +261,7 @@ class MapRelocalizer final : public rclcpp::Node {
   int required_confirmations_ = 2;
   int confirmations_ = 0;
   double confirmation_translation_m_ = 1.0;
+  double confirmation_rotation_rad_ = 15.0 * M_PI / 180.0;
   double recovery_timeout_s_ = 10.0;
   double relocalization_start_s_ = 0.0;
   bool localized_ = false;

@@ -45,6 +45,12 @@ FetchContent_Declare(
   GIT_TAG master
 )
 FetchContent_MakeAvailable(small_gicp)
+# CMake leaves a dependency's old CTestTestfile.cmake behind when BUILD_TESTS is
+# switched from ON to OFF. Clear that generated manifest so `colcon test` only
+# reports tests owned by this package even when reusing an existing build tree.
+if(NOT BUILD_TESTS AND DEFINED small_gicp_BINARY_DIR)
+  file(WRITE "${small_gicp_BINARY_DIR}/CTestTestfile.cmake" "")
+endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -74,6 +80,7 @@ add_definitions(${PCL_DEFINITIONS})
 find_package(GTSAM REQUIRED)
 
 add_library(kiss_matcher_slam_core
+  src/core/frame_and_transform_contract.cpp
   src/core/gps_altitude_manager.cpp
   src/core/incremental_map_builder.cpp
   src/core/keyframe_processor.cpp
@@ -251,6 +258,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_localization_quality_monitor test/test_localization_quality_monitor.cpp)
   target_include_directories(test_localization_quality_monitor PRIVATE include)
   target_link_libraries(test_localization_quality_monitor kiss_matcher_slam_core)
+
+  ament_add_gtest(test_frame_and_transform_contract test/test_frame_and_transform_contract.cpp)
+  target_include_directories(test_frame_and_transform_contract PRIVATE include)
+  target_link_libraries(test_frame_and_transform_contract kiss_matcher_slam_core)
 
   ament_add_gtest(test_loop_closure test/test_loop_closure.cpp src/slam/loop_closure.cpp)
   target_include_directories(test_loop_closure PRIVATE include ${PCL_INCLUDE_DIRS})

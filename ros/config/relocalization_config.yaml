@@ -5,6 +5,7 @@
     query_period_s: 1.0
     required_confirmations: 2
     confirmation_translation_m: 1.0
+    confirmation_rotation_deg: 15.0
     recovery_timeout_s: 10.0
     mode_control_enabled: true
 

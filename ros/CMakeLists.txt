@@ -50,7 +50,9 @@ set(BUILD_TESTS OFF CACHE BOOL "Disable dependency tests" FORCE)
 FetchContent_Declare(
   small_gicp
   GIT_REPOSITORY https://github.com/koide3/small_gicp
-  GIT_TAG master
+  # Verified with ROS 2 Humble, GCC 11 and both C/zh_CN configure locales.
+  # Pin the immutable revision so upstream master cannot change our build.
+  GIT_TAG fa0cfc983417c044b6036f71dfa448038bb9c820
 )
 FetchContent_MakeAvailable(small_gicp)
 # CMake leaves a dependency's old CTestTestfile.cmake behind when BUILD_TESTS is

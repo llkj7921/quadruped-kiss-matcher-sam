@@ -2,6 +2,9 @@
 
 #include <filesystem>
 
+#include <Eigen/Geometry>
+#include <tf2/exceptions.h>
+
 using namespace kiss_matcher;
 
 PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
@@ -23,6 +26,10 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   enable_loop_nnsearch   = declare_parameter<bool>("loop.enable_nnsearch", false);
   map_update_hz          = declare_parameter<double>("map_update_hz", 0.2);
   vis_hz                 = declare_parameter<double>("vis_hz", 0.5);
+  mode_control_enabled_ = declare_parameter<bool>("mode_control_enabled", false);
+  incremental_map_directory_ =
+      declare_parameter<std::string>("incremental_map_directory", "");
+  mapping_active_ = !mode_control_enabled_;
 
   store_voxelized_scan_            = declare_parameter<bool>("store_voxelized_scan", false);
   lc_config.voxel_res_             = declare_parameter<double>("voxel_resolution", 0.3);
@@ -121,6 +128,8 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
 
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   loop_closure_          = std::make_shared<LoopClosure>(lc_config, this->get_logger());
   loop_detection_radius_ = lc_config.loop_detection_radius_;
@@ -155,6 +164,8 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
   debug_fine_aligned_pub_ =
       this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/fine_alignment", qos);
   debug_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("lc/debug_cloud", qos);
+  mode_result_pub_ = this->create_publisher<std_msgs::msg::String>(
+      "/mapping/mode_result", rclcpp::QoS(1).reliable().transient_local());
 
   sub_odom_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this, "/odom");
   sub_scan_ =
@@ -167,6 +178,11 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
 
   sub_save_flag_ = this->create_subscription<std_msgs::msg::String>(
       "save_dir", 1, std::bind(&PoseGraphManager::saveFlagCallback, this, std::placeholders::_1));
+  if (mode_control_enabled_) {
+    sub_system_mode_ = this->create_subscription<std_msgs::msg::String>(
+        "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
+        std::bind(&PoseGraphManager::modeCallback, this, std::placeholders::_1));
+  }
   if (gps_altitude_manager_->enabled()) {
     sub_gps_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
         "gps/fix", rclcpp::SensorDataQoS(),
@@ -277,13 +293,31 @@ void PoseGraphManager::appendKeyframePose(const PoseGraphNode &node) {
 
 void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,
                                     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &scan_msg) {
+  if (!mapping_active_) return;
   const size_t latest_keyframe_idx = keyframe_processor_->nextKeyframeId();
 
   // NOTE(hlim): For clarification, 'current' refers to the real-time incoming messages,
   // while 'latest' indicates the last keyframe stored in map_database_.
   Eigen::Matrix4d current_odom = current_frame_.pose_;
-  current_frame_               = PoseGraphNode(
+  current_frame_ = PoseGraphNode(
       *odom_msg, *scan_msg, latest_keyframe_idx, scan_voxel_res_, store_voxelized_scan_);
+  if (incremental_mapping_active_) {
+    try {
+      const auto aligned_odom = odometryInMap(*odom_msg);
+      const Eigen::Quaterniond aligned_q(
+          aligned_odom.pose.pose.orientation.w, aligned_odom.pose.pose.orientation.x,
+          aligned_odom.pose.pose.orientation.y, aligned_odom.pose.pose.orientation.z);
+      current_frame_.pose_.block<3, 3>(0, 0) = aligned_q.normalized().toRotationMatrix();
+      current_frame_.pose_.block<3, 1>(0, 3) = Eigen::Vector3d(
+          aligned_odom.pose.pose.position.x, aligned_odom.pose.pose.position.y,
+          aligned_odom.pose.pose.position.z);
+      current_frame_.pose_corrected_ = current_frame_.pose_;
+    } catch (const tf2::TransformException &error) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Waiting for map-to-odometry transform: %s", error.what());
+      return;
+    }
+  }
 
   kiss_matcher::TicToc total_timer;
 
@@ -313,6 +347,109 @@ void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPt
       t_total,
       t_keyframe_processing,
       keyframe_result.optimization_time_ms);
+}
+
+void PoseGraphManager::modeCallback(const std_msgs::msg::String::ConstSharedPtr &message) {
+  const bool mapping = message->data.rfind("mode=mapping", 0) == 0;
+  const bool incremental = message->data.rfind("mode=incremental_mapping", 0) == 0;
+  const bool exiting = message->data.rfind("mode=exiting", 0) == 0;
+  const bool was_mapping_active = mapping_active_.exchange(false);
+  incremental_mapping_active_ = false;
+
+  if (exiting && was_mapping_active) {
+    try {
+      writeTrajectoryProducts();
+      if (save_map_pcd_ && !map_database_.empty()) {
+        map_product_writer_->writeMap(map_database_.snapshot(), true);
+      }
+      std_msgs::msg::String result;
+      result.data = "ready:exited";
+      mode_result_pub_->publish(result);
+    } catch (const std::exception &error) {
+      std_msgs::msg::String result;
+      result.data = std::string("error:") + error.what();
+      mode_result_pub_->publish(result);
+    }
+    return;
+  }
+
+  if (mapping) {
+    if (!map_database_.empty()) {
+      RCLCPP_ERROR(get_logger(), "A mapping session already exists; restart the node for a new map");
+      std_msgs::msg::String result;
+      result.data = "error:a mapping session already exists; restart the node for a new map";
+      mode_result_pub_->publish(result);
+      return;
+    }
+    mapping_active_ = true;
+    std_msgs::msg::String result;
+    result.data = "ready:mapping";
+    mode_result_pub_->publish(result);
+    return;
+  }
+  if (!incremental) return;
+
+  try {
+    if (!incremental_map_loaded_) {
+      if (incremental_map_directory_.empty()) {
+        throw std::runtime_error("incremental_map_directory is empty");
+      }
+      const auto keyframes =
+          kiss_matcher_slam::MapProductLoader::load(incremental_map_directory_);
+      keyframe_processor_->restore(keyframes);
+      for (const auto &frame : keyframes) {
+        appendKeyframePose(PoseGraphNode(frame));
+        map_product_writer_->appendKeyframe(frame);
+      }
+      writeTrajectoryProducts();
+      incremental_map_loaded_ = true;
+      RCLCPP_INFO(get_logger(), "Restored %zu keyframes for incremental mapping",
+                  keyframes.size());
+    }
+    incremental_mapping_active_ = true;
+    mapping_active_ = true;
+    std_msgs::msg::String result;
+    result.data = "ready:incremental_mapping";
+    mode_result_pub_->publish(result);
+  } catch (const std::exception &error) {
+    RCLCPP_ERROR(get_logger(), "Cannot enter incremental mapping: %s", error.what());
+    std_msgs::msg::String result;
+    result.data = std::string("error:") + error.what();
+    mode_result_pub_->publish(result);
+  }
+}
+
+nav_msgs::msg::Odometry PoseGraphManager::odometryInMap(
+    const nav_msgs::msg::Odometry &odom) const {
+  const auto transform = tf_buffer_->lookupTransform(
+      map_frame_, odom.header.frame_id, odom.header.stamp, rclcpp::Duration::from_seconds(0.05));
+  Eigen::Quaterniond q(transform.transform.rotation.w, transform.transform.rotation.x,
+                       transform.transform.rotation.y, transform.transform.rotation.z);
+  Eigen::Matrix4d map_to_odom = Eigen::Matrix4d::Identity();
+  map_to_odom.block<3, 3>(0, 0) = q.normalized().toRotationMatrix();
+  map_to_odom.block<3, 1>(0, 3) =
+      Eigen::Vector3d(transform.transform.translation.x,
+                      transform.transform.translation.y,
+                      transform.transform.translation.z);
+  Eigen::Quaterniond odom_q(odom.pose.pose.orientation.w, odom.pose.pose.orientation.x,
+                            odom.pose.pose.orientation.y, odom.pose.pose.orientation.z);
+  Eigen::Matrix4d odom_pose = Eigen::Matrix4d::Identity();
+  odom_pose.block<3, 3>(0, 0) = odom_q.normalized().toRotationMatrix();
+  odom_pose.block<3, 1>(0, 3) = Eigen::Vector3d(
+      odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z);
+  const Eigen::Matrix4d pose = map_to_odom * odom_pose;
+
+  auto result = odom;
+  result.header.frame_id = map_frame_;
+  result.pose.pose.position.x = pose(0, 3);
+  result.pose.pose.position.y = pose(1, 3);
+  result.pose.pose.position.z = pose(2, 3);
+  const Eigen::Quaterniond result_q(pose.block<3, 3>(0, 0));
+  result.pose.pose.orientation.x = result_q.x();
+  result.pose.pose.orientation.y = result_q.y();
+  result.pose.pose.orientation.z = result_q.z();
+  result.pose.pose.orientation.w = result_q.w();
+  return result;
 }
 
 void PoseGraphManager::buildMap() {

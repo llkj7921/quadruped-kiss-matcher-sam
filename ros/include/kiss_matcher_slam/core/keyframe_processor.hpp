@@ -39,6 +39,7 @@ class KeyframeProcessor {
                     MappingRuntimeState &runtime_state);
 
   std::size_t nextKeyframeId() const noexcept;
+  void restore(const std::vector<Keyframe> &keyframes);
   KeyframeProcessingResult process(const Keyframe &frame);
 
  private:

@@ -54,6 +54,37 @@ std::size_t KeyframeProcessor::nextKeyframeId() const noexcept {
   return runtime_state_.nextKeyframeId();
 }
 
+void KeyframeProcessor::restore(const std::vector<Keyframe> &keyframes) {
+  if (keyframes.empty()) throw std::invalid_argument("cannot restore an empty map product");
+  if (!map_database_.empty() || runtime_state_.initialized() ||
+      !pose_graph_backend_.estimates().empty()) {
+    throw std::logic_error("mapping session is already initialized");
+  }
+
+  for (std::size_t id = 0; id < keyframes.size(); ++id) {
+    auto frame = keyframes[id];
+    if (frame.id != id) throw std::invalid_argument("restored keyframe IDs must be contiguous");
+    frame.place_recognition_processed = true;
+    frame.proximity_search_processed = true;
+    map_database_.append(frame);
+    const auto pose = toGtsam(frame.optimized_pose);
+    if (id == 0) {
+      pose_graph_backend_.addPrior(id, pose, prior_variances_);
+    } else {
+      const auto previous = toGtsam(keyframes[id - 1].optimized_pose);
+      pose_graph_backend_.addOdometry(
+          id - 1, id, previous.between(pose), pose, odometry_variances_);
+    }
+  }
+  const auto optimization = pose_graph_backend_.optimize();
+  if (optimization.estimates.size() != keyframes.size()) {
+    throw std::runtime_error("restored pose graph size does not match map product");
+  }
+  runtime_state_.reset(keyframes.size());
+  runtime_state_.requestMapRebuild();
+  runtime_state_.requestGraphRefresh();
+}
+
 KeyframeProcessingResult KeyframeProcessor::process(const Keyframe &frame) {
   KeyframeProcessingResult result;
   const auto expected_id = runtime_state_.nextKeyframeId();

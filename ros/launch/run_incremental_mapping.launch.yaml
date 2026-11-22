@@ -1,0 +1,46 @@
+launch:
+  - arg: {name: map_directory, default: '', description: Complete existing map-product directory}
+  - arg: {name: slam_config, default: $(find-pkg-share kiss_matcher_ros)/config/slam_config.yaml}
+  - arg: {name: relocalization_config, default: $(find-pkg-share kiss_matcher_ros)/config/relocalization_config.yaml}
+  - arg: {name: odom_topic, default: '/odometry'}
+  - arg: {name: scan_topic, default: '/cloud_registered'}
+  - arg: {name: output_directory, default: 'maps'}
+  - arg: {name: output_sequence, default: 'incremental_sequence'}
+
+  - node:
+      pkg: kiss_matcher_ros
+      exec: system_mode_manager
+      name: system_mode_manager
+      output: screen
+      param:
+        - {name: map_directory, value: $(var map_directory)}
+
+  - node:
+      pkg: kiss_matcher_ros
+      exec: kiss_matcher_relocalizer
+      name: kiss_matcher_relocalizer
+      output: screen
+      remap:
+        - {from: odom, to: $(var odom_topic)}
+        - {from: cloud, to: $(var scan_topic)}
+      param:
+        - from: $(var relocalization_config)
+        - {name: map_directory, value: $(var map_directory)}
+
+  - node:
+      namespace: km_sam
+      pkg: kiss_matcher_ros
+      exec: kiss_matcher_sam
+      name: kiss_matcher_sam
+      output: screen
+      remap:
+        - {from: '/odom', to: $(var odom_topic)}
+        - {from: '/cloud', to: $(var scan_topic)}
+      param:
+        - from: $(var slam_config)
+        - {name: mode_control_enabled, value: true}
+        - {name: incremental_map_directory, value: $(var map_directory)}
+        - {name: result.output_directory, value: $(var output_directory)}
+        - {name: result.seq_name, value: $(var output_sequence)}
+        - {name: result.save_keyframes_incrementally, value: true}
+        - {name: result.overwrite_existing, value: false}

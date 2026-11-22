@@ -22,6 +22,7 @@ TEST(SystemModeManager, RequiresNormalAsTransitionHub) {
 
   EXPECT_TRUE(manager.completeExit(true).accepted);
   EXPECT_EQ(manager.snapshot().mode, SystemMode::kNormal);
+  manager.setLocalizationState(true, true, "/maps/v1");
   EXPECT_TRUE(manager.requestEnter(SystemMode::kIncrementalMapping, "/maps/v1").accepted);
 }
 
@@ -31,6 +32,13 @@ TEST(SystemModeManager, MapBasedModesRequireMapDirectory) {
   EXPECT_FALSE(manager.requestEnter(SystemMode::kIncrementalMapping).accepted);
   EXPECT_TRUE(manager.requestEnter(SystemMode::kRelocalization, "/maps/v2").accepted);
   EXPECT_EQ(manager.snapshot().active_map_directory, "/maps/v2");
+}
+
+TEST(SystemModeManager, IncrementalMappingRequiresValidLocalization) {
+  SystemModeManager manager;
+  EXPECT_FALSE(manager.requestEnter(SystemMode::kIncrementalMapping, "/maps/v1").accepted);
+  manager.setLocalizationState(true, true, "/maps/v1");
+  EXPECT_TRUE(manager.requestEnter(SystemMode::kIncrementalMapping, "/maps/v1").accepted);
 }
 
 TEST(SystemModeManager, FailedExitStillReturnsToNormalButInvalidatesLocalization) {

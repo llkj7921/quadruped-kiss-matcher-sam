@@ -122,6 +122,8 @@ class MapRelocalizer final : public rclcpp::Node {
   void modeCallback(const std_msgs::msg::String::ConstSharedPtr message) {
     const bool requested = message->data.rfind("mode=relocalization", 0) == 0;
     normal_mode_active_ = message->data.rfind("mode=normal", 0) == 0;
+    incremental_mapping_active_ =
+        message->data.rfind("mode=incremental_mapping", 0) == 0;
     if (requested && !relocalization_active_) {
       localized_ = false;
       have_tentative_ = false;
@@ -179,7 +181,8 @@ class MapRelocalizer final : public rclcpp::Node {
     if (!localized_ && !relocalization_active_) return;
     const auto odom_pose = odometryPose(*odom);
     if (localized_) {
-      if (mode_control_enabled_ && !normal_mode_active_) return;
+      if (mode_control_enabled_ && !normal_mode_active_ &&
+          !incremental_mapping_active_) return;
       publishMapToOdom(*odom);
       return;
     }
@@ -243,6 +246,7 @@ class MapRelocalizer final : public rclcpp::Node {
   bool mode_control_enabled_ = true;
   bool relocalization_active_ = false;
   bool normal_mode_active_ = false;
+  bool incremental_mapping_active_ = false;
   bool have_tentative_ = false;
   std::size_t tentative_candidate_ = 0;
   double voxel_resolution_ = 0.3;

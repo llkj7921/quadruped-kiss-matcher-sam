@@ -3,6 +3,7 @@
 #ifndef KISS_MATCHER_POSE_GRAPH_MANAGER_H
 #define KISS_MATCHER_POSE_GRAPH_MANAGER_H
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -29,6 +30,8 @@
 #include "message_filters/synchronizer.h"
 
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 #include <gtsam/geometry/Point3.h>
 #include <gtsam/geometry/Pose3.h>
@@ -45,6 +48,7 @@
 #include "kiss_matcher_slam/core/map_database.hpp"
 #include "kiss_matcher_slam/core/mapping_runtime_state.hpp"
 #include "kiss_matcher_slam/core/map_product_writer.hpp"
+#include "kiss_matcher_slam/core/map_product_loader.hpp"
 #include "kiss_matcher_slam/core/pose_graph_backend.hpp"
 #include "kiss_matcher_slam/core/realtime_pose_tracker.hpp"
 #include "kiss_matcher_slam/core/scan_context_loop_detector.hpp"
@@ -69,6 +73,8 @@ class PoseGraphManager : public rclcpp::Node {
 
   void callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,
                     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &scan_msg);
+  void modeCallback(const std_msgs::msg::String::ConstSharedPtr &message);
+  nav_msgs::msg::Odometry odometryInMap(const nav_msgs::msg::Odometry &odom) const;
   void buildMap();
   void detectLoopClosureByScanContext();
   void detectLoopClosureByNNSearch();
@@ -120,6 +126,8 @@ class PoseGraphManager : public rclcpp::Node {
   kiss_matcher_slam::LoopCandidateQueue loop_candidate_queue_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
   bool store_voxelized_scan_ = false;
 
@@ -127,6 +135,11 @@ class PoseGraphManager : public rclcpp::Node {
   bool save_in_kitti_format_ = false;
   bool save_keyframes_incrementally_ = false;
   bool overwrite_existing_product_ = false;
+  bool mode_control_enabled_ = false;
+  std::atomic<bool> mapping_active_{true};
+  std::atomic<bool> incremental_mapping_active_{false};
+  bool incremental_map_loaded_ = false;
+  std::string incremental_map_directory_;
 
   std::shared_ptr<kiss_matcher::LoopClosure> loop_closure_;
 
@@ -149,8 +162,10 @@ class PoseGraphManager : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_coarse_aligned_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_fine_aligned_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_cloud_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mode_result_pub_;
 
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_save_flag_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_system_mode_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr sub_gps_;
 
   // message_filters

@@ -74,6 +74,32 @@ TEST(KeyframeProcessor, RejectsOutOfSequenceFrame) {
   EXPECT_TRUE(fixture.database.empty());
 }
 
+TEST(KeyframeProcessor, RestoresMapAndContinuesKeyframeSequence) {
+  Fixture fixture;
+  auto processor = fixture.makeProcessor();
+  const std::vector<kiss_matcher_slam::Keyframe> restored{
+      makeFrame(0, 1.0, 0.0), makeFrame(1, 2.0, 1.5)};
+
+  processor.restore(restored);
+  EXPECT_EQ(processor.nextKeyframeId(), 2U);
+  EXPECT_EQ(fixture.database.size(), 2U);
+  EXPECT_EQ(fixture.backend.estimates().size(), 2U);
+  EXPECT_TRUE(fixture.runtime.consumeMapRebuildRequest());
+  EXPECT_TRUE(fixture.runtime.consumeGraphRefreshRequest());
+
+  const auto continued = processor.process(makeFrame(2, 3.0, 3.0));
+  EXPECT_TRUE(continued.accepted);
+  EXPECT_EQ(fixture.database.size(), 3U);
+  EXPECT_EQ(fixture.backend.estimates().size(), 3U);
+}
+
+TEST(KeyframeProcessor, RejectsRestoreAfterSessionInitialization) {
+  Fixture fixture;
+  auto processor = fixture.makeProcessor();
+  processor.process(makeFrame(0, 1.0, 0.0));
+  EXPECT_THROW(processor.restore({makeFrame(0, 1.0, 0.0)}), std::logic_error);
+}
+
 TEST(KeyframeProcessor, AppliesLoopCorrectionDuringNextMappingTransaction) {
   Fixture fixture;
   auto processor = fixture.makeProcessor();

@@ -38,6 +38,11 @@ ModeTransitionResult SystemModeManager::requestEnter(
       map_directory.empty()) {
     return resultLocked(false, "the requested mode requires a map directory");
   }
+  if (target == SystemMode::kIncrementalMapping &&
+      (!state_.map_loaded || !state_.localization_valid)) {
+    return resultLocked(false,
+                        "incremental mapping requires successful relocalization first");
+  }
 
   state_.mode = target;
   state_.exiting_from = SystemMode::kNormal;

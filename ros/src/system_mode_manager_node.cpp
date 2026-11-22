@@ -25,6 +25,23 @@ class SystemModeManagerNode final : public rclcpp::Node {
         [this](const std_msgs::msg::Bool::ConstSharedPtr message) {
           if (message->data) completeRelocalization();
         });
+    mapping_result_sub_ = create_subscription<std_msgs::msg::String>(
+        "mapping/mode_result", rclcpp::QoS(1).reliable().transient_local(),
+        [this](const std_msgs::msg::String::ConstSharedPtr message) {
+          if (message->data.rfind("error:", 0) == 0) {
+            const auto error = message->data.substr(6);
+            if (manager_.snapshot().mode == SystemMode::kExiting) {
+              manager_.completeExit(false, error);
+              publishState();
+            } else {
+              failActiveMode(error);
+            }
+          } else if (message->data == "ready:exited" &&
+                     manager_.snapshot().mode == SystemMode::kExiting) {
+            manager_.completeExit(true);
+            publishState();
+          }
+        });
 
     enter_mapping_ = create_service<std_srvs::srv::Trigger>(
         "mode/enter_mapping",
@@ -124,10 +141,29 @@ class SystemModeManagerNode final : public rclcpp::Node {
         });
   }
 
+  void failActiveMode(const std::string& error) {
+    const auto state = manager_.snapshot();
+    if (state.mode != SystemMode::kMapping &&
+        state.mode != SystemMode::kIncrementalMapping) {
+      return;
+    }
+    const auto exiting = manager_.requestExit();
+    if (!exiting.accepted) return;
+    RCLCPP_ERROR(get_logger(), "mode startup failed: %s", error.c_str());
+    publishState();
+    exit_completion_timer_ = create_wall_timer(
+        std::chrono::milliseconds(100), [this, error]() {
+          exit_completion_timer_->cancel();
+          manager_.completeExit(false, error);
+          publishState();
+        });
+  }
+
   SystemModeManager manager_;
   std::string map_directory_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr relocalization_state_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mapping_result_sub_;
   rclcpp::TimerBase::SharedPtr exit_completion_timer_;
   rclcpp::Service<Trigger>::SharedPtr enter_mapping_;
   rclcpp::Service<Trigger>::SharedPtr enter_incremental_mapping_;

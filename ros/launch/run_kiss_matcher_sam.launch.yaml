@@ -12,6 +12,8 @@ launch:
 
   - arg: {name: odom_topic, default: "/odometry"}
   - arg: {name: scan_topic, default: "/cloud_registered"}
+  - arg: {name: mode_control_enabled, default: "false"}
+  - arg: {name: incremental_map_directory, default: ""}
 
   - node:
       namespace: $(var namespace)
@@ -31,6 +33,10 @@ launch:
           value: "$(var map_frame)"
         - name: "base_frame"
           value: "$$(var base_frame)"
+        - name: "mode_control_enabled"
+          value: $(var mode_control_enabled)
+        - name: "incremental_map_directory"
+          value: $(var incremental_map_directory)
 
         - from: $(var config_path)
 

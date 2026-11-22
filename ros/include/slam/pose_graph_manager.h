@@ -74,6 +74,7 @@ class PoseGraphManager : public rclcpp::Node {
   void callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,
                     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &scan_msg);
   void modeCallback(const std_msgs::msg::String::ConstSharedPtr &message);
+  void recoveryStatusCallback(const std_msgs::msg::String::ConstSharedPtr &message);
   nav_msgs::msg::Odometry odometryInMap(const nav_msgs::msg::Odometry &odom) const;
   void buildMap();
   void detectLoopClosureByScanContext();
@@ -138,6 +139,7 @@ class PoseGraphManager : public rclcpp::Node {
   bool mode_control_enabled_ = false;
   std::atomic<bool> mapping_active_{true};
   std::atomic<bool> incremental_mapping_active_{false};
+  std::atomic<bool> recovery_allows_map_writes_{true};
   bool incremental_map_loaded_ = false;
   std::string incremental_map_directory_;
 
@@ -166,6 +168,7 @@ class PoseGraphManager : public rclcpp::Node {
 
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_save_flag_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_system_mode_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_recovery_status_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr sub_gps_;
 
   // message_filters

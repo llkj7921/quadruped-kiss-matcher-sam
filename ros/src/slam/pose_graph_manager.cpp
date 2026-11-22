@@ -178,6 +178,9 @@ PoseGraphManager::PoseGraphManager(const rclcpp::NodeOptions &options)
 
   sub_save_flag_ = this->create_subscription<std_msgs::msg::String>(
       "save_dir", 1, std::bind(&PoseGraphManager::saveFlagCallback, this, std::placeholders::_1));
+  sub_recovery_status_ = this->create_subscription<std_msgs::msg::String>(
+      "/recovery/status", rclcpp::QoS(1).reliable().transient_local(),
+      std::bind(&PoseGraphManager::recoveryStatusCallback, this, std::placeholders::_1));
   if (mode_control_enabled_) {
     sub_system_mode_ = this->create_subscription<std_msgs::msg::String>(
         "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
@@ -293,7 +296,7 @@ void PoseGraphManager::appendKeyframePose(const PoseGraphNode &node) {
 
 void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg,
                                     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &scan_msg) {
-  if (!mapping_active_) return;
+  if (!mapping_active_ || !recovery_allows_map_writes_) return;
   const size_t latest_keyframe_idx = keyframe_processor_->nextKeyframeId();
 
   // NOTE(hlim): For clarification, 'current' refers to the real-time incoming messages,
@@ -347,6 +350,18 @@ void PoseGraphManager::callbackNode(const nav_msgs::msg::Odometry::ConstSharedPt
       t_total,
       t_keyframe_processing,
       keyframe_result.optimization_time_ms);
+}
+
+void PoseGraphManager::recoveryStatusCallback(
+    const std_msgs::msg::String::ConstSharedPtr &message) {
+  const bool allowed = message->data.find("map_writes_allowed=true") != std::string::npos;
+  const bool previously_allowed = recovery_allows_map_writes_.exchange(allowed);
+  if (previously_allowed && !allowed) {
+    RCLCPP_WARN(get_logger(), "Map writes paused by localization health: %s",
+                message->data.c_str());
+  } else if (!previously_allowed && allowed) {
+    RCLCPP_INFO(get_logger(), "Map writes resumed after localization recovery");
+  }
 }
 
 void PoseGraphManager::modeCallback(const std_msgs::msg::String::ConstSharedPtr &message) {

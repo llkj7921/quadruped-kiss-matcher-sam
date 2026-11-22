@@ -80,6 +80,7 @@ add_library(kiss_matcher_slam_core
   src/core/keyframe_selector.cpp
   src/core/loop_candidate_queue.cpp
   src/core/loop_constraint_processor.cpp
+  src/core/localization_quality_monitor.cpp
   src/core/map_database.cpp
   src/core/map_product_loader.cpp
   src/core/mapping_runtime_state.cpp
@@ -246,6 +247,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_system_mode_manager test/test_system_mode_manager.cpp)
   target_include_directories(test_system_mode_manager PRIVATE include)
   target_link_libraries(test_system_mode_manager kiss_matcher_slam_core)
+
+  ament_add_gtest(test_localization_quality_monitor test/test_localization_quality_monitor.cpp)
+  target_include_directories(test_localization_quality_monitor PRIVATE include)
+  target_link_libraries(test_localization_quality_monitor kiss_matcher_slam_core)
 
   ament_add_gtest(test_loop_closure test/test_loop_closure.cpp src/slam/loop_closure.cpp)
   target_include_directories(test_loop_closure PRIVATE include ${PCL_INCLUDE_DIRS})

@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <limits>
@@ -55,8 +56,9 @@ class MapRelocalizer final : public rclcpp::Node {
     const auto query_period_s = declare_parameter<double>("query_period_s", 1.0);
     required_confirmations_ = declare_parameter<int>("required_confirmations", 2);
     confirmation_translation_m_ = declare_parameter<double>("confirmation_translation_m", 1.0);
+    recovery_timeout_s_ = declare_parameter<double>("recovery_timeout_s", 10.0);
     if (map_directory.empty() || query_period_s <= 0.0 || required_confirmations_ <= 0 ||
-        confirmation_translation_m_ <= 0.0) {
+        confirmation_translation_m_ <= 0.0 || recovery_timeout_s_ <= 0.0) {
       throw std::invalid_argument("invalid relocalization configuration");
     }
     query_period_s_ = query_period_s;
@@ -101,6 +103,18 @@ class MapRelocalizer final : public rclcpp::Node {
     pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("pose", 10);
     localized_pub_ = create_publisher<std_msgs::msg::Bool>(
         "/relocalization/localized", rclcpp::QoS(1).reliable().transient_local());
+    recovery_status_pub_ = create_publisher<std_msgs::msg::String>(
+        "/relocalization/recovery_status", rclcpp::QoS(1).reliable().transient_local());
+    recovery_watchdog_ = create_wall_timer(std::chrono::milliseconds(500), [this]() {
+      if (!relocalization_active_ || assistance_published_) return;
+      if (now().seconds() - relocalization_start_s_ < recovery_timeout_s_) return;
+      assistance_published_ = true;
+      std_msgs::msg::String status;
+      status.data = "operator_assistance_required";
+      recovery_status_pub_->publish(status);
+      RCLCPP_ERROR(get_logger(),
+                   "Relocalization timed out; keep manual motion enabled and return to a known area or viewpoint");
+    });
     if (mode_control_enabled_) {
       mode_sub_ = create_subscription<std_msgs::msg::String>(
           "/system_mode", rclcpp::QoS(1).reliable().transient_local(),
@@ -129,6 +143,8 @@ class MapRelocalizer final : public rclcpp::Node {
       have_tentative_ = false;
       confirmations_ = 0;
       last_query_stamp_ = -std::numeric_limits<double>::infinity();
+      relocalization_start_s_ = now().seconds();
+      assistance_published_ = false;
       RCLCPP_INFO(get_logger(), "Relocalization mode activated");
     }
     relocalization_active_ = requested;
@@ -242,11 +258,14 @@ class MapRelocalizer final : public rclcpp::Node {
   int required_confirmations_ = 2;
   int confirmations_ = 0;
   double confirmation_translation_m_ = 1.0;
+  double recovery_timeout_s_ = 10.0;
+  double relocalization_start_s_ = 0.0;
   bool localized_ = false;
   bool mode_control_enabled_ = true;
   bool relocalization_active_ = false;
   bool normal_mode_active_ = false;
   bool incremental_mapping_active_ = false;
+  bool assistance_published_ = false;
   bool have_tentative_ = false;
   std::size_t tentative_candidate_ = 0;
   double voxel_resolution_ = 0.3;
@@ -259,7 +278,9 @@ class MapRelocalizer final : public rclcpp::Node {
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localized_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recovery_status_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_sub_;
+  rclcpp::TimerBase::SharedPtr recovery_watchdog_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> cloud_sub_;
   std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<nav_msgs::msg::Odometry, sensor_msgs::msg::PointCloud2>>> sync_;

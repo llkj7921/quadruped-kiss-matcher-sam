@@ -11,6 +11,17 @@ TEST(FrameContract, RequiresDistinctNonEmptyFrames) {
   EXPECT_FALSE(kiss_matcher_slam::distinctMapAndOdometryFrames("", "odom"));
 }
 
+TEST(FrameContract, RelocalizationInputsMustBothUseConfiguredOdometryFrame) {
+  EXPECT_TRUE(kiss_matcher_slam::relocalizationInputFramesValid(
+      "odom", "odom", "odom"));
+  EXPECT_FALSE(kiss_matcher_slam::relocalizationInputFramesValid(
+      "map", "odom", "odom"));
+  EXPECT_FALSE(kiss_matcher_slam::relocalizationInputFramesValid(
+      "odom", "lidar", "odom"));
+  EXPECT_FALSE(kiss_matcher_slam::relocalizationInputFramesValid(
+      "odom", "odom", ""));
+}
+
 TEST(TransformContract, RejectsRotationDisagreementEvenWhenTranslationMatches) {
   Eigen::Matrix4d first = Eigen::Matrix4d::Identity();
   Eigen::Matrix4d second = Eigen::Matrix4d::Identity();

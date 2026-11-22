@@ -80,11 +80,18 @@ class MapRelocalizer final : public rclcpp::Node {
 
     kiss_matcher::LoopClosureConfig registration;
     registration.voxel_res_ = declare_parameter<double>("voxel_resolution", 0.3);
-    registration.num_submap_keyframes_ = static_cast<std::size_t>(
-        declare_parameter<int>("num_submap_keyframes", 1));
+    const int num_submap_keyframes = declare_parameter<int>("num_submap_keyframes", 1);
     registration.enable_global_registration_ = true;
-    registration.num_inliers_threshold_ = static_cast<std::size_t>(
-        declare_parameter<int>("global_reg.num_inliers_threshold", 50));
+    const int num_inliers_threshold =
+        declare_parameter<int>("global_reg.num_inliers_threshold", 50);
+    if (num_submap_keyframes <= 0 || num_inliers_threshold <= 0) {
+      throw std::invalid_argument(
+          "num_submap_keyframes and global_reg.num_inliers_threshold must be positive");
+    }
+    registration.num_submap_keyframes_ =
+        static_cast<std::size_t>(num_submap_keyframes);
+    registration.num_inliers_threshold_ =
+        static_cast<std::size_t>(num_inliers_threshold);
     registration.matcher_config_ = kiss_matcher::KISSMatcherConfig(registration.voxel_res_, false);
     registration.gicp_config_.num_threads_ = declare_parameter<int>("local_reg.num_threads", 8);
     registration.gicp_config_.correspondence_randomness_ =
@@ -141,6 +148,9 @@ class MapRelocalizer final : public rclcpp::Node {
     sync_ = std::make_shared<message_filters::Synchronizer<Policy>>(Policy(20), *odom_sub_, *cloud_sub_);
     sync_->registerCallback(std::bind(&MapRelocalizer::callback, this, std::placeholders::_1,
                                       std::placeholders::_2));
+    odom_tf_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        "odom", rclcpp::SensorDataQoS(),
+        std::bind(&MapRelocalizer::odometryCallback, this, std::placeholders::_1));
   }
 
  private:
@@ -208,14 +218,38 @@ class MapRelocalizer final : public rclcpp::Node {
     pose_pub_->publish(pose);
   }
 
+  void odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom) {
+    if (!localized_) return;
+    if (mode_control_enabled_ && !normal_mode_active_ &&
+        !incremental_mapping_active_) return;
+    if (odom->header.frame_id != odom_frame_) {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 5000,
+          "Ignoring odometry for TF: frame_id '%s' does not match configured odom frame '%s'",
+          odom->header.frame_id.c_str(), odom_frame_.c_str());
+      return;
+    }
+    try {
+      publishMapToOdom(*odom);
+    } catch (const std::exception &error) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "Ignoring invalid odometry for TF: %s", error.what());
+    }
+  }
+
   void callback(const nav_msgs::msg::Odometry::ConstSharedPtr &odom,
                 const sensor_msgs::msg::PointCloud2::ConstSharedPtr &cloud) {
     if (!localized_ && !relocalization_active_) return;
+    if (!kiss_matcher_slam::relocalizationInputFramesValid(
+            odom->header.frame_id, cloud->header.frame_id, odom_frame_)) {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 5000,
+          "Ignoring relocalization input: odometry frame='%s', cloud frame='%s', expected='%s'",
+          odom->header.frame_id.c_str(), cloud->header.frame_id.c_str(), odom_frame_.c_str());
+      return;
+    }
     const auto odom_pose = odometryPose(*odom);
     if (localized_) {
-      if (mode_control_enabled_ && !normal_mode_active_ &&
-          !incremental_mapping_active_) return;
-      publishMapToOdom(*odom);
       return;
     }
     const double stamp = rclcpp::Time(odom->header.stamp).seconds();
@@ -305,6 +339,7 @@ class MapRelocalizer final : public rclcpp::Node {
   rclcpp::Publisher<slam_system_interfaces::msg::RelocalizationStatus>::SharedPtr
       relocalization_status_pub_;
   rclcpp::Subscription<slam_system_interfaces::msg::SystemMode>::SharedPtr mode_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_tf_sub_;
   rclcpp::TimerBase::SharedPtr recovery_watchdog_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> cloud_sub_;

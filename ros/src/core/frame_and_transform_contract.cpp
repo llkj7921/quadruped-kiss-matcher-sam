@@ -10,6 +10,14 @@ bool distinctMapAndOdometryFrames(const std::string& map_frame,
   return !map_frame.empty() && !odom_frame.empty() && map_frame != odom_frame;
 }
 
+bool relocalizationInputFramesValid(const std::string& odometry_frame,
+                                    const std::string& cloud_frame,
+                                    const std::string& expected_odometry_frame) {
+  return !expected_odometry_frame.empty() &&
+         odometry_frame == expected_odometry_frame &&
+         cloud_frame == expected_odometry_frame;
+}
+
 double rotationDistanceRadians(const Eigen::Matrix4d& lhs,
                                const Eigen::Matrix4d& rhs) {
   const Eigen::Matrix3d relative =

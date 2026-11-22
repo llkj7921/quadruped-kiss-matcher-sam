@@ -145,6 +145,20 @@ class TestRecoveryStateChain(unittest.TestCase):
         self.assertFalse(self.recovery.map_writes_allowed)
         self.assertFalse(self.recovery.autonomy_allowed)
 
+        # Duplicate success and fresh health failures must not move the two
+        # state machines out of the confirmation barrier.
+        self.relocalization_status_pub.publish(localized)
+        self.publish_bad_health()
+        self.publish_bad_health()
+        self.spin_for(0.25)
+        self.assertEqual(
+            self.recovery.state, RecoveryStatus.RECOVERED_WAITING_CONFIRMATION
+        )
+        self.assertEqual(self.mode.mode, SystemMode.NORMAL)
+        self.assertFalse(self.recovery.map_writes_allowed)
+        self.assertFalse(self.recovery.autonomy_allowed)
+        self.assertFalse(self.map_updates_allowed)
+
         self.assertTrue(self.ack_client.wait_for_service(timeout_sec=5.0))
         future = self.ack_client.call_async(Trigger.Request())
         self.spin_until(lambda: future.done())
@@ -155,6 +169,12 @@ class TestRecoveryStateChain(unittest.TestCase):
             and self.recovery.autonomy_allowed
             and self.map_updates_allowed is True
         )
+
+        duplicate_ack = self.ack_client.call_async(Trigger.Request())
+        self.spin_until(lambda: duplicate_ack.done())
+        self.assertFalse(duplicate_ack.result().success)
+        self.assertEqual(self.recovery.state, RecoveryStatus.NORMAL)
+        self.assertEqual(self.mode.mode, SystemMode.NORMAL)
 
         late_state = []
         late_sub = self.node.create_subscription(

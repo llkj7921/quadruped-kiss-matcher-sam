@@ -36,5 +36,25 @@ TEST(RecoveryCoordinator, KeepsAssistanceAndSuspectedTransitionsDefensive) {
   EXPECT_EQ(coordinator.snapshot().reason, "return to known area");
 }
 
+TEST(RecoveryCoordinator, DuplicateAndOutOfOrderEventsAreIdempotent) {
+  RecoveryCoordinator coordinator;
+  ASSERT_TRUE(coordinator.beginRecovery("localization lost"));
+  coordinator.markRelocalized();
+  ASSERT_TRUE(coordinator.confirmationRequired());
+
+  coordinator.markRelocalized();
+  EXPECT_FALSE(coordinator.observeLocalizationQuality(
+      RawLocalizationQuality::kBad, "late bad report"));
+  EXPECT_FALSE(coordinator.beginRecovery("duplicate recovery request"));
+  EXPECT_EQ(coordinator.snapshot().state,
+            RecoveryState::kRecoveredWaitingConfirmation);
+  EXPECT_FALSE(coordinator.snapshot().map_writes_allowed);
+  EXPECT_FALSE(coordinator.snapshot().autonomy_allowed);
+
+  EXPECT_TRUE(coordinator.acknowledgeRecovery());
+  EXPECT_FALSE(coordinator.acknowledgeRecovery());
+  EXPECT_EQ(coordinator.snapshot().state, RecoveryState::kNormal);
+}
+
 }  // namespace
 }  // namespace kiss_matcher_slam

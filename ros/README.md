@@ -20,6 +20,35 @@ ______________________________________________________________________
 This repository provides LiDAR SLAM using KISS-Matcher.
 If you just want to **perform registration using ROS2**, see [README_ROS2_REGISTRATION.md](https://github.com/MIT-SPARK/KISS-Matcher/blob/main/ros/README_ROS2_REGISTRATION.md).
 
+### Unified Mid-360 robot bringup
+
+Start FAST-LIO, mode management, KISS-SAM and optional diagnostics with one
+command. By default the Livox driver is expected to be started externally:
+
+```bash
+ros2 launch kiss_matcher_ros robot_slam_bringup.launch.py \
+  environment:=outdoor start_rviz:=false record_diagnostics:=true
+```
+
+Enter mapping after the stack is ready:
+
+```bash
+ros2 service call /mode/enter_mapping std_srvs/srv/Trigger '{}'
+```
+
+For relocalization and incremental mapping, provide a complete map product:
+
+```bash
+ros2 launch kiss_matcher_ros robot_slam_bringup.launch.py \
+  map_directory:=/absolute/path/to/map_product \
+  start_relocalizer:=true output_sequence:=incremental_run
+```
+
+Set `start_driver:=true` after `livox_ros_driver2` is installed to include its
+launch file. Diagnostics are recorded by default to a timestamped directory
+under `/tmp`; override `diagnostics_output` for persistent storage or set
+`record_diagnostics:=false` to disable recording.
+
 ## :gear: How To Build & RUN
 
 1. Put this repository in your colcon workspace, and then build this repository as follows:

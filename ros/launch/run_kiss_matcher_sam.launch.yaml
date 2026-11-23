@@ -35,7 +35,7 @@ launch:
         - name: "odom_frame"
           value: "$(var odom_frame)"
         - name: "base_frame"
-          value: "$$(var base_frame)"
+          value: "$(var base_frame)"
         - name: "mode_control_enabled"
           value: $(var mode_control_enabled)
         - name: "incremental_map_directory"

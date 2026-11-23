@@ -39,6 +39,78 @@ robot SLAM project. It is **not an official MIT-SPARK release**.
 Academic use should cite the original KISS-Matcher and Scan Context papers
 listed in this repository's documentation.
 
+## Quadruped SLAM quick start (ROS 2 Humble)
+
+This branch is the system entry point for the quadruped SLAM stack. It must be
+built together with the matching FAST-LIO front end and typed interface package:
+
+```bash
+mkdir -p ~/slam_workspace/fastlio2_ws/src
+cd ~/slam_workspace/fastlio2_ws/src
+git clone https://github.com/llkj7921/quadruped-kiss-matcher-sam.git KISS-Matcher
+git clone https://github.com/llkj7921/quadruped-spark-fast-lio.git spark-fast-lio
+git clone https://github.com/llkj7921/slam-system-interfaces.git slam_system_interfaces
+
+cd ..
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Start the integrated stack (FAST-LIO, KISS-SAM and mode manager):
+
+```bash
+ros2 launch kiss_matcher_ros robot_slam_bringup.launch.py \
+  environment:=outdoor start_rviz:=false record_diagnostics:=true
+```
+
+The Livox driver is optional in this launch file. Set `start_driver:=true` only
+after `livox_ros_driver2` is installed and its launch file is available. On a
+robot whose driver is started separately, keep the default `false` value.
+
+Enter mapping mode:
+
+```bash
+ros2 service call /mode/enter_mapping std_srvs/srv/Trigger '{}'
+```
+
+Inspect recovery state:
+
+```bash
+ros2 topic echo /recovery/state
+ros2 service call /recovery/status std_srvs/srv/Trigger '{}'
+```
+
+After a successful recovery that is waiting for operator confirmation:
+
+```bash
+ros2 service call /recovery/acknowledge std_srvs/srv/Trigger '{}'
+```
+
+The recovery message exposes `motion_allowed`, `map_writes_allowed` and
+`autonomy_allowed`. Robot navigation/task control must subscribe to
+`/recovery/state` and enforce `autonomy_allowed`; publishing the permission does
+not stop the robot controller by itself.
+
+For an existing map product, provide its absolute directory and enable the
+relocalizer:
+
+```bash
+ros2 launch kiss_matcher_ros robot_slam_bringup.launch.py \
+  map_directory:=/absolute/path/to/map_product \
+  start_relocalizer:=true output_sequence:=incremental_run
+```
+
+Each new terminal must source both ROS and the workspace overlay. Production
+deployments should put these commands in a launch wrapper or systemd service
+rather than relying on an interactive shell:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/slam_workspace/fastlio2_ws/install/setup.bash
+```
+
 ## :package: Installation
 
 > All installations are set up automatically in an out-of-the-box manner.

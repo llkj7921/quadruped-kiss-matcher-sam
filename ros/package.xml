@@ -2,7 +2,8 @@
 <package format="3">
   <name>kiss_matcher_ros</name>
   <version>0.1.0</version>
-  <description>PointCloud Visualizer for ROS2</description>
+  <description>Quadruped ROS 2 SLAM back end, loop closure, relocalization, and recovery control based on KISS-Matcher.</description>
+  <maintainer email="llkj09203@gmail.com">llkj7921</maintainer>
   <maintainer email="shapelim@mit.edu">Hyungtae Lim</maintainer>
   <maintainer email="ted97k@kaist.ac.kr">Daebeom Kim</maintainer>
 

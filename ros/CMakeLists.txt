@@ -102,6 +102,7 @@ add_library(kiss_matcher_slam_core
   src/core/map_database.cpp
   src/core/map_product_loader.cpp
   src/core/mapping_runtime_state.cpp
+  src/core/offline_dynamic_map_filter.cpp
   src/core/map_product_writer.cpp
   src/core/pose_graph_backend.cpp
   src/core/realtime_pose_tracker.cpp
@@ -192,6 +193,10 @@ add_executable(scan_context_benchmark src/tools/scan_context_benchmark.cpp)
 target_include_directories(scan_context_benchmark PUBLIC include ${PCL_INCLUDE_DIRS})
 target_link_libraries(scan_context_benchmark kiss_matcher_slam_core ${PCL_LIBRARIES})
 
+add_executable(offline_dynamic_map_filter src/tools/offline_dynamic_map_filter.cpp)
+target_include_directories(offline_dynamic_map_filter PUBLIC include ${PCL_INCLUDE_DIRS})
+target_link_libraries(offline_dynamic_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
+
 add_executable(system_mode_manager src/system_mode_manager_node.cpp)
 ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs slam_system_interfaces)
 target_link_libraries(system_mode_manager kiss_matcher_slam_core)
@@ -204,6 +209,7 @@ install(TARGETS
   kiss_matcher_relocalizer
   inter_frame_alignment
   scan_context_benchmark
+  offline_dynamic_map_filter
   system_mode_manager
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -249,6 +255,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_map_product_writer test/test_map_product_writer.cpp)
   target_include_directories(test_map_product_writer PRIVATE include ${PCL_INCLUDE_DIRS})
   target_link_libraries(test_map_product_writer kiss_matcher_slam_core ${PCL_LIBRARIES})
+
+  ament_add_gtest(test_offline_dynamic_map_filter test/test_offline_dynamic_map_filter.cpp)
+  target_include_directories(test_offline_dynamic_map_filter PRIVATE include ${PCL_INCLUDE_DIRS})
+  target_link_libraries(test_offline_dynamic_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
 
   ament_add_gtest(test_pose_graph_backend test/test_pose_graph_backend.cpp)
   target_include_directories(test_pose_graph_backend PRIVATE include ${PCL_INCLUDE_DIRS})

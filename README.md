@@ -73,6 +73,19 @@ cp config/robot.env.example config/robot.env
 
 特殊模式之间不能直接切换，必须先退出到常规定位。
 
+建图完成后可生成不覆盖原图的离线清理地图：
+
+```bash
+ros2 run kiss_matcher_ros offline_dynamic_map_filter \
+  /absolute/path/to/map_product \
+  --observation-voxel 0.30 --output-voxel 0.10 \
+  --min-observations 3 --min-duration 0.5
+```
+
+默认输出 `clean_map.pcd` 和 `clean_map_report.yaml`。该功能按跨关键帧
+体素持久性清除短暂目标，不是语义人体检测；详细说明见
+[离线动态点过滤](ros/docs/offline_dynamic_filter.md)。
+
 ## 恢复状态
 
 ```bash

@@ -20,6 +20,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "kiss_matcher_slam/core/keyframe.hpp"
+#include "kiss_matcher_slam/core/online_dynamic_filter.hpp"
 #include "slam/loop_types.hpp"
 #include "slam/utils.hpp"
 
@@ -37,6 +38,7 @@ struct GICPConfig {
 };
 
 struct LoopClosureConfig {
+  kiss_matcher_slam::OnlineDynamicFilterConfig dynamic_filter_;
   bool verbose_                    = false;
   bool enable_global_registration_ = true;
   bool is_multilayer_env_          = false;

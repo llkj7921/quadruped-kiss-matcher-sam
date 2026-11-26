@@ -169,12 +169,13 @@ NodePair LoopClosure::setSrcAndTgtCloud(
   tgt_accum.reserve(num_approx);
 
   const bool build_submap = (num_submap_keyframes > 1);
+  const kiss_matcher_slam::OnlineDynamicFilter dynamic_filter(config_.dynamic_filter_);
 
   auto accumulateSubmap = [&](size_t center_idx, pcl::PointCloud<PointType> &accum) {
     const size_t start = (center_idx < submap_range) ? 0 : center_idx - submap_range;
     const size_t end   = std::min(center_idx + submap_range + 1, keyframes.size());
     for (size_t i = start; i < end; ++i) {
-      accum += transformPcd(keyframes[i].cloud, keyframes[i].optimized_pose);
+      accum += transformPcd(dynamic_filter.filter(keyframes, i), keyframes[i].optimized_pose);
     }
   };
 
@@ -182,9 +183,9 @@ NodePair LoopClosure::setSrcAndTgtCloud(
     accumulateSubmap(src_idx, src_accum);
     accumulateSubmap(tgt_idx, tgt_accum);
   } else {
-    src_accum = transformPcd(keyframes[src_idx].cloud, keyframes[src_idx].optimized_pose);
+    src_accum = transformPcd(dynamic_filter.filter(keyframes, src_idx), keyframes[src_idx].optimized_pose);
     if (enable_global_registration) {
-      tgt_accum = transformPcd(keyframes[tgt_idx].cloud, keyframes[tgt_idx].optimized_pose);
+      tgt_accum = transformPcd(dynamic_filter.filter(keyframes, tgt_idx), keyframes[tgt_idx].optimized_pose);
     } else {
       // For ICP matching,
       // empirically scan-to-submap matching works better than scan-to-scan matching

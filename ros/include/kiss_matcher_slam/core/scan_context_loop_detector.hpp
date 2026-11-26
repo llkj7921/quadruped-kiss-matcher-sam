@@ -8,6 +8,7 @@
 #include <Eigen/Core>
 
 #include "kiss_matcher_slam/core/keyframe.hpp"
+#include "kiss_matcher_slam/core/online_dynamic_filter.hpp"
 #include "kiss_matcher_slam/core/results.hpp"
 
 namespace kiss_matcher_slam {
@@ -15,6 +16,7 @@ namespace kiss_matcher_slam {
 class RingKeySearchIndex;
 
 struct ScanContextConfig {
+  OnlineDynamicFilterConfig dynamic_filter;
   int num_rings = 20;
   int num_sectors = 60;
   int exclude_recent = 30;

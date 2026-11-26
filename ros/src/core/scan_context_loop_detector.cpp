@@ -193,7 +193,8 @@ void ScanContextLoopDetector::appendMissingDescriptors(
     if (keyframes[index].id != index) {
       throw std::invalid_argument("Scan Context keyframes must have contiguous IDs");
     }
-    auto descriptor = makeDescriptor(keyframes[index].cloud);
+    const OnlineDynamicFilter filter(config_.dynamic_filter);
+    auto descriptor = makeDescriptor(filter.filter(keyframes, index));
     ring_keys_.push_back(makeRingKey(descriptor));
     sector_keys_.push_back(makeSectorKey(descriptor));
     descriptors_.push_back(std::move(descriptor));

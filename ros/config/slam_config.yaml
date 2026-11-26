@@ -15,6 +15,15 @@
     map_voxel_resolution: 1.0        # Resolution used when building map. Only for visualization
     save_voxel_resolution: 0.3       # Resolution used when saving voxelized map
 
+    # Experimental: conservative free-space evidence in the back-end only.
+    # Enable after validating on recordings from the actual sensor and scene.
+    dynamic_filter:
+      enable: false
+      history_frames: 8
+      minimum_free_observations: 2
+      angular_resolution_rad: 0.005
+      range_margin_m: 0.5
+
     keyframe:
       keyframe_threshold: 1.5        # ⭐ [Unit: m] Distance threshold to add a new keyframe
       rotation_threshold_deg: 10.0  # Add a keyframe after this much in-place rotation

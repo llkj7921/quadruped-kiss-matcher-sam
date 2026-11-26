@@ -130,6 +130,15 @@ PoseGraphManagerConfig PoseGraphManager::loadConfig() {
   config.store_voxelized_scan = declare_parameter<bool>("store_voxelized_scan", false);
 
   auto &loop = config.loop_closure;
+  auto &dynamic_filter = loop.dynamic_filter_;
+  dynamic_filter.enabled = declare_parameter<bool>("dynamic_filter.enable", false);
+  dynamic_filter.history_frames = declare_parameter<int>("dynamic_filter.history_frames", 8);
+  dynamic_filter.minimum_free_observations =
+      declare_parameter<int>("dynamic_filter.minimum_free_observations", 2);
+  dynamic_filter.angular_resolution_rad =
+      declare_parameter<double>("dynamic_filter.angular_resolution_rad", 0.005);
+  dynamic_filter.range_margin_m = declare_parameter<double>("dynamic_filter.range_margin_m", 0.5);
+  (void)kiss_matcher_slam::OnlineDynamicFilter(dynamic_filter);
   loop.voxel_res_ = declare_parameter<double>("voxel_resolution", 0.3);
   loop.matcher_config_ = KISSMatcherConfig(loop.voxel_res_, false);
   config.map_voxel_resolution = declare_parameter<double>("map_voxel_resolution", 1.0);
@@ -163,6 +172,7 @@ PoseGraphManagerConfig PoseGraphManager::loadConfig() {
   config.scan_context_verbose = declare_parameter<bool>("scan_context.verbose", false);
   config.scan_context_enabled = declare_parameter<bool>("scan_context.enable", true);
   auto &scan_context = config.scan_context;
+  scan_context.dynamic_filter = dynamic_filter;
   scan_context.num_rings = declare_parameter<int>("scan_context.num_rings", 20);
   scan_context.num_sectors = declare_parameter<int>("scan_context.num_sectors", 60);
   scan_context.exclude_recent = declare_parameter<int>("scan_context.exclude_recent", 30);

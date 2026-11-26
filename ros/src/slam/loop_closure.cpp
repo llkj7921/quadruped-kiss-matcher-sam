@@ -170,12 +170,19 @@ NodePair LoopClosure::setSrcAndTgtCloud(
 
   const bool build_submap = (num_submap_keyframes > 1);
   const kiss_matcher_slam::OnlineDynamicFilter dynamic_filter(config_.dynamic_filter_);
+  size_t filter_input_points = 0, filter_output_points = 0;
+  auto filtered = [&](size_t i) {
+    auto cloud = dynamic_filter.filter(keyframes, i);
+    filter_input_points += keyframes[i].cloud.size();
+    filter_output_points += cloud.size();
+    return cloud;
+  };
 
   auto accumulateSubmap = [&](size_t center_idx, pcl::PointCloud<PointType> &accum) {
     const size_t start = (center_idx < submap_range) ? 0 : center_idx - submap_range;
     const size_t end   = std::min(center_idx + submap_range + 1, keyframes.size());
     for (size_t i = start; i < end; ++i) {
-      accum += transformPcd(dynamic_filter.filter(keyframes, i), keyframes[i].optimized_pose);
+      accum += transformPcd(filtered(i), keyframes[i].optimized_pose);
     }
   };
 
@@ -183,14 +190,18 @@ NodePair LoopClosure::setSrcAndTgtCloud(
     accumulateSubmap(src_idx, src_accum);
     accumulateSubmap(tgt_idx, tgt_accum);
   } else {
-    src_accum = transformPcd(dynamic_filter.filter(keyframes, src_idx), keyframes[src_idx].optimized_pose);
+    src_accum = transformPcd(filtered(src_idx), keyframes[src_idx].optimized_pose);
     if (enable_global_registration) {
-      tgt_accum = transformPcd(dynamic_filter.filter(keyframes, tgt_idx), keyframes[tgt_idx].optimized_pose);
+      tgt_accum = transformPcd(filtered(tgt_idx), keyframes[tgt_idx].optimized_pose);
     } else {
       // For ICP matching,
       // empirically scan-to-submap matching works better than scan-to-scan matching
       accumulateSubmap(tgt_idx, tgt_accum);
     }
+  }
+  if (config_.dynamic_filter_.enabled) {
+    RCLCPP_INFO(logger_, "Online dynamic filter: input=%zu retained=%zu removed=%zu",
+                filter_input_points, filter_output_points, filter_input_points - filter_output_points);
   }
   return {*voxelize(src_accum, voxel_res), *voxelize(tgt_accum, voxel_res)};
 }

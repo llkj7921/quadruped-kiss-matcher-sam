@@ -110,6 +110,7 @@ add_library(kiss_matcher_slam_core
   src/core/scan_context_loop_detector.cpp
   src/core/system_mode_manager.cpp
   src/core/visualization_state.cpp
+  src/core/visibility_map_filter.cpp
 )
 target_include_directories(kiss_matcher_slam_core PUBLIC include ${PCL_INCLUDE_DIRS})
 target_link_libraries(kiss_matcher_slam_core kiss_matcher::kiss_matcher_core ${PCL_LIBRARIES} gtsam)
@@ -197,6 +198,10 @@ add_executable(offline_dynamic_map_filter src/tools/offline_dynamic_map_filter.c
 target_include_directories(offline_dynamic_map_filter PUBLIC include ${PCL_INCLUDE_DIRS})
 target_link_libraries(offline_dynamic_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
 
+add_executable(visibility_map_filter src/tools/visibility_map_filter.cpp)
+target_include_directories(visibility_map_filter PRIVATE include ${PCL_INCLUDE_DIRS})
+target_link_libraries(visibility_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
+
 add_executable(system_mode_manager src/system_mode_manager_node.cpp)
 ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs slam_system_interfaces)
 target_link_libraries(system_mode_manager kiss_matcher_slam_core)
@@ -210,6 +215,7 @@ install(TARGETS
   inter_frame_alignment
   scan_context_benchmark
   offline_dynamic_map_filter
+  visibility_map_filter
   system_mode_manager
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -218,6 +224,9 @@ install(TARGETS
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_visibility_map_filter test/test_visibility_map_filter.cpp)
+  target_include_directories(test_visibility_map_filter PRIVATE include ${PCL_INCLUDE_DIRS})
+  target_link_libraries(test_visibility_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
   ament_add_gtest(test_online_dynamic_filter test/test_online_dynamic_filter.cpp)
   target_include_directories(test_online_dynamic_filter PRIVATE include ${PCL_INCLUDE_DIRS})
   target_link_libraries(test_online_dynamic_filter ${PCL_LIBRARIES})

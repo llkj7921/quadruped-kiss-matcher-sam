@@ -1,6 +1,6 @@
 # Offline approximate visibility filter
 
-`visibility_map_filter MAP_PRODUCT NEW_OUTPUT_DIRECTORY` compares each saved
+`visibility_map_filter MAP_PRODUCT NEW_OUTPUT_DIRECTORY [--output-voxel METERS]` compares each saved
 keyframe point with other optimized keyframes in their local sensor frames.
 It counts nearby angular returns behind the candidate as free-space evidence,
 nearby returns at the candidate range as occupied evidence, and returns in
@@ -11,7 +11,9 @@ therefore preserves/reverts candidates but is not a full Removert algorithm.
 
 The tool writes a new `clean_map.pcd`, `removed_points.pcd` and
 `uncertain_points.pcd` (when nonempty), plus `report.yaml`. It refuses an
-existing output directory and never changes the input product. Counts in the
+existing output directory and never changes the input product. The optional
+output voxel defaults to 0.1 m and affects only the exported point clouds, not
+the visibility evidence or the original keyframes. Counts in the
 report refer to original keyframe points before output voxelization.
 
 This is an approximate angular-neighbour test on saved, downsampled clouds,

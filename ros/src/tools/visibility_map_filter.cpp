@@ -10,11 +10,17 @@
 namespace fs = std::filesystem;
 int main(int argc, char** argv) {
   try {
-    if (argc != 3) throw std::invalid_argument("usage: visibility_map_filter MAP_PRODUCT NEW_OUTPUT_DIRECTORY");
+    if (argc != 3 && argc != 5) throw std::invalid_argument("usage: visibility_map_filter MAP_PRODUCT NEW_OUTPUT_DIRECTORY [--output-voxel METERS]");
     const fs::path input(argv[1]), output(argv[2]);
     if (fs::exists(output)) throw std::runtime_error("output directory already exists");
     const auto frames = kiss_matcher_slam::MapProductLoader::load(input);
-    const kiss_matcher_slam::VisibilityMapFilterConfig config;
+    kiss_matcher_slam::VisibilityMapFilterConfig config;
+    if (argc == 5) {
+      if (std::string(argv[3]) != "--output-voxel") throw std::invalid_argument("unknown option: " + std::string(argv[3]));
+      std::size_t consumed = 0;
+      config.output_voxel_resolution_m = std::stod(argv[4], &consumed);
+      if (consumed != std::string(argv[4]).size()) throw std::invalid_argument("invalid output voxel value");
+    }
     const auto result = kiss_matcher_slam::VisibilityMapFilter(config).filter(frames);
     if (result.retained.empty()) throw std::runtime_error("filter produced an empty map");
     fs::create_directories(output);

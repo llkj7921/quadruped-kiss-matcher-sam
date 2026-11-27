@@ -89,3 +89,11 @@ python3 ros/scripts/adaptive_outlier_review.py --map /path/to/new/order_test/kep
 
 All outputs are experimental; do not use them as navigation truth without
 reviewing false removals and residuals against raw data and ground truth.
+
+`review_group_ties.py` is an optional, offline-only sensitivity experiment. It
+adds candidate source returns only inside pre-existing dynamic-candidate groups
+when free and occupied votes tie at least twice and occlusion votes are at least
+five. These observations are correlated; occlusion is not motion evidence on
+its own. It records the incremental candidates and preserves other uncertain
+group returns. The fixed thresholds have not been validated on independent
+scenes, so this is not a production default.

@@ -16,12 +16,15 @@ p.add_argument('--raw', type=Path, required=True)
 p.add_argument('--point-first', type=Path, required=True)
 p.add_argument('--cluster-first', type=Path, required=True)
 p.add_argument('--output', type=Path, required=True)
+p.add_argument('--point-label', default='点标签→团标签→轻度离群')
+p.add_argument('--cluster-label', default='团标签→点标签→轻度离群')
+p.add_argument('--title', default='同一原始观测、相同阈值：标签驱动的处理顺序对比\n团级候选集合不同，关键帧射线证据均未修改')
 a = p.parse_args()
-maps = [('原始融合图', load_pcd(a.raw)), ('点标签→团标签→轻度离群', load_pcd(a.point_first)), ('团标签→点标签→轻度离群', load_pcd(a.cluster_first))]
+maps = [('原始融合图', load_pcd(a.raw)), (a.point_label, load_pcd(a.point_first)), (a.cluster_label, load_pcd(a.cluster_first))]
 far = lambda x: (x[:, 1] > 25) & (np.abs(x[:, 0]) < 10)
 target = lambda x: (x[:, 0] >= 2.68) & (x[:, 0] <= 3.57) & (x[:, 1] >= 13.81) & (x[:, 1] <= 15.70) & (x[:, 2] >= -.80) & (x[:, 2] <= .69)
 report = {name: {'all': len(x), 'display': int((x[:, 2] <= 1.5).sum()), 'far_all_heights': int(far(x).sum()), 'target_bbox_all_heights': int(target(x).sum())} for name, x in maps}
-report['warning'] = 'Group queries differ by preceding point labels; raw ray observations remain unchanged. Counts are not ground truth, and the target box may contain static points.'
+report['warning'] = 'Counts are not ground truth, and the target box may contain static points. Refer to the experiment report for input and filter details.'
 if a.output.exists():
     raise ValueError('output directory already exists')
 a.output.mkdir(parents=True)
@@ -40,5 +43,5 @@ for col, (name, points) in enumerate(maps):
         ax.set_aspect('equal'); ax.grid(alpha=.15); ax.set_xlabel('地图 X（米）'); ax.set_ylabel('地图 Y（米）')
         if row == 0: ax.set_title(name); ax.set_xlim(-5, 31); ax.set_ylim(-14, 36)
         else: ax.set_title('走廊目标附近'); ax.set_xlim(1, 5); ax.set_ylim(13, 17)
-fig.suptitle('同一原始观测、相同阈值：标签驱动的处理顺序对比\n团级候选集合不同，关键帧射线证据均未修改', fontsize=14)
+fig.suptitle(a.title, fontsize=14)
 fig.savefig(a.output / '标签驱动_顺序对比.png', dpi=180)

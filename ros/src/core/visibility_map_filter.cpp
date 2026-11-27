@@ -17,7 +17,7 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 struct Ray { Eigen::Vector3f direction; float range; };
 using RayGrid = std::unordered_map<std::int64_t, std::vector<Ray>>;
-struct Evidence { std::size_t free = 0, occupied = 0, occluded = 0; };
+using Evidence = VisibilityPointEvidence;
 
 std::int64_t key(int azimuth, int elevation) {
   return (static_cast<std::int64_t>(azimuth) << 32) | static_cast<std::uint32_t>(elevation);
@@ -120,6 +120,7 @@ VisibilityMapFilterResult VisibilityMapFilter::filter(const std::vector<Keyframe
   voxelize(result.retained, config_.output_voxel_resolution_m);
   voxelize(result.removed, config_.output_voxel_resolution_m);
   voxelize(result.uncertain, config_.output_voxel_resolution_m);
+  if (config_.capture_point_evidence) result.point_evidence = std::move(evidence);
   return result;
 }
 }  // namespace kiss_matcher_slam

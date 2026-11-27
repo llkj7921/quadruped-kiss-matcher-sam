@@ -36,4 +36,18 @@ TEST(VisibilityMapFilter, HandlesSensorPoseAndRejectsInvalidConfiguration) {
   EXPECT_THROW((void)VisibilityMapFilter(config), std::invalid_argument);
   EXPECT_THROW((void)VisibilityMapFilter().filter({}), std::invalid_argument);
 }
+TEST(VisibilityMapFilter, CapturesExactFramePointVotesOnlyWhenRequested) {
+  const std::vector<Keyframe> frames{frame(0,{5}),frame(1,{10}),frame(2,{10}),frame(3,{10})};
+  const auto original = VisibilityMapFilter().filter(frames);
+  EXPECT_TRUE(original.point_evidence.empty());
+  VisibilityMapFilterConfig config; config.capture_point_evidence = true;
+  const auto captured = VisibilityMapFilter(config).filter(frames);
+  ASSERT_EQ(captured.point_evidence.size(), frames.size());
+  ASSERT_EQ(captured.point_evidence[0].size(), 1U);
+  EXPECT_EQ(captured.point_evidence[0][0].free, 3U);
+  EXPECT_EQ(captured.point_evidence[0][0].occupied, 0U);
+  EXPECT_EQ(captured.dynamic_points, original.dynamic_points);
+  EXPECT_EQ(captured.static_points, original.static_points);
+  EXPECT_EQ(captured.uncertain_points, original.uncertain_points);
+}
 }  // namespace

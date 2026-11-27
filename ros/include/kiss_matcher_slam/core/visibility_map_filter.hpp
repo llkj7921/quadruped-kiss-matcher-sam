@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include "kiss_matcher_slam/core/keyframe.hpp"
 
@@ -14,6 +15,14 @@ struct VisibilityMapFilterConfig {
   double output_voxel_resolution_m = 0.1;
   std::size_t minimum_free_observations = 3;
   double free_to_occupied_ratio = 2.0;
+  // Off by default: avoids storing per-return evidence in existing callers.
+  bool capture_point_evidence = false;
+};
+
+struct VisibilityPointEvidence {
+  std::uint32_t free = 0;
+  std::uint32_t occupied = 0;
+  std::uint32_t occluded = 0;
 };
 
 struct VisibilityMapFilterResult {
@@ -27,6 +36,7 @@ struct VisibilityMapFilterResult {
   std::size_t free_observations = 0;
   std::size_t occupied_observations = 0;
   std::size_t occluded_observations = 0;
+  std::vector<std::vector<VisibilityPointEvidence>> point_evidence;
 };
 
 // Approximate visibility using measured returns in a small angular cone.

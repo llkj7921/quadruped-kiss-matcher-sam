@@ -202,6 +202,10 @@ add_executable(visibility_map_filter src/tools/visibility_map_filter.cpp)
 target_include_directories(visibility_map_filter PRIVATE include ${PCL_INCLUDE_DIRS})
 target_link_libraries(visibility_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
 
+add_executable(visibility_evidence_export src/tools/visibility_evidence_export.cpp)
+target_include_directories(visibility_evidence_export PRIVATE include ${PCL_INCLUDE_DIRS})
+target_link_libraries(visibility_evidence_export kiss_matcher_slam_core ${PCL_LIBRARIES})
+
 add_executable(system_mode_manager src/system_mode_manager_node.cpp)
 ament_target_dependencies(system_mode_manager rclcpp std_msgs std_srvs slam_system_interfaces)
 target_link_libraries(system_mode_manager kiss_matcher_slam_core)
@@ -216,6 +220,7 @@ install(TARGETS
   scan_context_benchmark
   offline_dynamic_map_filter
   visibility_map_filter
+  visibility_evidence_export
   system_mode_manager
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib

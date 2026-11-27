@@ -17,6 +17,11 @@ the decision and is not ground truth. Points are not matched by index unless
 the exact same input path and point count are recorded in the prior report;
 do not modify the input PCD in place.
 
+Optional repeatable `--protected` arguments preserve exact matching points
+from later outlier removal; this is useful for uncertain or recovery-candidate
+points produced by the joint evidence review. Protection does not establish
+that those points are genuinely static.
+
 ```
 python3 ros/scripts/adaptive_outlier_review.py \
   --map /path/to/visibility/clean_map.pcd \

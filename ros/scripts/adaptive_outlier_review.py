@@ -12,6 +12,20 @@ from scipy.sparse.csgraph import connected_components
 from multiframe_outlier_review import load_pcd, write_pcd
 
 
+def apply_protection(adaptive, xyz, protected):
+    """Keep only geometrically matching protected map points; reject mismatched inputs."""
+    if not len(protected):
+        return adaptive, 0
+    distances, indices = cKDTree(xyz).query(protected[:, :3], k=1, workers=-1)
+    if np.any(distances > 1e-5):
+        raise ValueError('protected points do not match filter input')
+    result = adaptive.copy()
+    protected_indices = np.unique(indices)
+    protected_count = int(result[protected_indices].sum())
+    result[protected_indices] = False
+    return result, protected_count
+
+
 def classify(xyz, neighbors=20, local_neighbors=100, sigma_factor=2.5,
              ratio=1.5, floor=0.04, component_radius=0.12, component_max=5):
     """Return adaptive SOR candidates and isolated-component candidates.
@@ -50,11 +64,17 @@ def main():
     p.add_argument('--component-max-points', type=int, default=5)
     p.add_argument('--display-max-z', type=float, default=1.5)
     p.add_argument('--support-evidence', type=Path, help='Prior multiframe review directory; report support without auto-protecting or deleting')
+    p.add_argument('--protected', type=Path, action='append', help='Points to preserve, from this exact input; may be repeated')
     a = p.parse_args()
     if a.neighbors < 1 or a.local_neighbors < a.neighbors or a.sigma_factor <= 0 or a.ratio <= 1 or a.threshold_floor <= 0 or a.component_radius <= 0 or a.component_max_points < 1:
         p.error('invalid parameters')
     cloud = load_pcd(a.map)
     adaptive, components, spacing, threshold, size = classify(cloud[:, :3], a.neighbors, a.local_neighbors, a.sigma_factor, a.ratio, a.threshold_floor, a.component_radius, a.component_max_points)
+    protected_count = 0
+    if a.protected:
+        for protected_path in a.protected:
+            adaptive, count = apply_protection(adaptive, cloud[:, :3], load_pcd(protected_path))
+            protected_count += count
     a.output.mkdir(parents=True, exist_ok=True)
     # Components are review-only, never silently removed.
     for name, mask in [('kept', ~adaptive), ('adaptive_candidates', adaptive), ('small_component_candidates', components)]:
@@ -62,8 +82,8 @@ def main():
         write_pcd(a.output / f'{name}_display.pcd', cloud[mask & (cloud[:, 2] <= a.display_max_z)])
     np.savez_compressed(a.output / 'evidence.npz', adaptive=adaptive, components=components, spacing=spacing, threshold=threshold, component_size=size)
     params = vars(a).copy()
-    params.update(map=str(a.map.resolve()), output=str(a.output.resolve()), support_evidence=str(a.support_evidence.resolve()) if a.support_evidence else None)
-    report = {'input': str(a.map.resolve()), 'points': len(cloud), 'kept': int((~adaptive).sum()), 'adaptive_candidates': int(adaptive.sum()), 'small_component_candidates_review_only': int(components.sum()), 'overlap_candidates': int((adaptive & components).sum()), 'parameters': params, 'note': 'Small components are review only, not removed. No point labels or accuracy claims.'}
+    params.update(map=str(a.map.resolve()), output=str(a.output.resolve()), support_evidence=str(a.support_evidence.resolve()) if a.support_evidence else None, protected=[str(x.resolve()) for x in a.protected] if a.protected else [])
+    report = {'input': str(a.map.resolve()), 'points': len(cloud), 'kept': int((~adaptive).sum()), 'adaptive_candidates': int(adaptive.sum()), 'protected_from_outlier_removal': protected_count, 'small_component_candidates_review_only': int(components.sum()), 'overlap_candidates': int((adaptive & components).sum()), 'parameters': params, 'note': 'Small components are review only, not removed. No point labels or accuracy claims.'}
     if a.support_evidence:
         previous = json.loads((a.support_evidence / 'report.json').read_text())
         if Path(previous['map']).resolve() != a.map.resolve() or previous['points'] != len(cloud):

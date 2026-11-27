@@ -15,10 +15,24 @@ unreviewed points remain. Nothing modifies the original map or online SLAM.
 python3 ros/scripts/cluster_visibility_review.py \
   --map /path/to/kept.pcd --keyframes /path/to/keyframes \
   --trajectory /path/to/optimized_trajectory_tum.txt \
-  --timestamps /path/to/timestamps.txt --output /path/to/new/review
+  --timestamps /path/to/timestamps.txt --temporal-mode bidirectional \
+  --output /path/to/new/review
 python3 ros/scripts/plot_cluster_visibility_review.py \
   --map /path/to/kept.pcd --review /path/to/new/review
 ```
+
+The default `forward` mode preserves the original behavior. Opt-in
+`bidirectional` mode accepts either (a) three later free frame votes after
+greedy temporal and spatial baseline separation or (b) a free vote before
+and another after the occupied interval, separated by both the configured
+time gap and sensor-origin distance. The rules are experimental: a different
+sensor position does not prove statistically independent viewpoints, and the
+occupied-frame count itself is not deduplicated. Occluded and unobserved
+samples are never counted as free. The selected timestamps are recorded in
+`frame_evidence.json`; inspect their raw keyframes before using a proposed
+deletion. The separate `inspect_cluster_rays.py` script draws point/nearest-ray
+matches for selected keyframes, but a 2-D projection is not proof of a valid
+3-D line of sight.
 
 Outputs include full-height and clipped proposed/uncertain/candidate PCDs,
 `clusters.csv` with centroid, vote counts and class, `frame_evidence.json`

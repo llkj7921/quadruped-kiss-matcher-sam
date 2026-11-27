@@ -23,6 +23,33 @@ def temporal_class(occupied, free, min_occupied, min_free, separation):
     return 'dynamic_candidate' if later_free >= min_free else 'uncertain'
 
 
+def bidirectional_class(occupied, free, positions, min_occupied, separation, baseline, time_gap):
+    """Require one free observation on each side from separated poses/times.
+
+    This is additional candidate evidence, not proof of a visible background.
+    """
+    if len(occupied) < min_occupied:
+        return 'uncertain', []
+    before = [t for t in free if t <= min(occupied) - separation]
+    after = [t for t in free if t >= max(occupied) + separation]
+    for first in before:
+        for second in after:
+            if second - first >= time_gap and np.linalg.norm(positions[first] - positions[second]) >= baseline:
+                return 'dynamic_candidate', [first, second]
+    return 'uncertain', []
+
+
+def separated_forward_class(occupied, free, positions, min_occupied, min_free, separation, baseline, time_gap):
+    if len(occupied) < min_occupied:
+        return 'uncertain', []
+    selected = []
+    start = sorted(occupied)[min_occupied - 1] + separation
+    for t in sorted(t for t in free if t >= start):
+        if all(abs(t - other) >= time_gap and np.linalg.norm(positions[t] - positions[other]) >= baseline for other in selected):
+            selected.append(t)
+    return ('dynamic_candidate' if len(selected) >= min_free else 'uncertain'), selected
+
+
 def cluster_cloud(xyz, radius, min_points, max_points):
     tree = cKDTree(xyz)
     pairs = tree.query_pairs(radius, output_type='ndarray')
@@ -54,9 +81,12 @@ def main():
     p.add_argument('--min-occupied-frames', type=int, default=2)
     p.add_argument('--min-free-frames', type=int, default=3)
     p.add_argument('--separation', type=float, default=1.)
+    p.add_argument('--temporal-mode', choices=['forward', 'bidirectional'], default='forward')
+    p.add_argument('--min-viewpoint-separation', type=float, default=.5)
+    p.add_argument('--min-evidence-time-gap', type=float, default=2.)
     p.add_argument('--display-max-z', type=float, default=1.5)
     a = p.parse_args()
-    if not (a.radius > 0 and 1 <= a.min_points <= a.max_points and a.sample_count >= a.min_valid_rays >= 1 and 0 < a.angular_resolution <= .1 and a.range_margin > 0 and a.max_range > 0 and 0 < a.minimum_coverage <= 1 and .5 < a.free_fraction <= 1 and 0 < a.occupied_fraction <= 1 and a.min_occupied_frames >= 1 and a.min_free_frames >= 1 and a.separation >= 0):
+    if not (a.radius > 0 and 1 <= a.min_points <= a.max_points and a.sample_count >= a.min_valid_rays >= 1 and 0 < a.angular_resolution <= .1 and a.range_margin > 0 and a.max_range > 0 and 0 < a.minimum_coverage <= 1 and .5 < a.free_fraction <= 1 and 0 < a.occupied_fraction <= 1 and a.min_occupied_frames >= 1 and a.min_free_frames >= 1 and a.separation >= 0 and a.min_viewpoint_separation > 0 and a.min_evidence_time_gap > 0):
         p.error('invalid parameters')
     cloud = load_pcd(a.map)
     poses = np.loadtxt(a.trajectory, comments='#', ndmin=2)
@@ -113,13 +143,21 @@ def main():
     uncertain = np.zeros(len(cloud), dtype=bool)
     rows = []
     frame_evidence = []
+    positions = {float(pose[0]): pose[1:4] for pose in poses}
     for n, cluster_id in enumerate(ids):
         indices = order[offsets[cluster_id]:offsets[cluster_id + 1]]
         cls = temporal_class(occupied[n], free[n], a.min_occupied_frames, a.min_free_frames, a.separation)
+        pair = []
+        forward_evidence = []
+        if a.temporal_mode == 'bidirectional':
+            cls, forward_evidence = separated_forward_class(occupied[n], free[n], positions, a.min_occupied_frames, a.min_free_frames, a.separation, a.min_viewpoint_separation, a.min_evidence_time_gap)
+            bidir, pair = bidirectional_class(occupied[n], free[n], positions, a.min_occupied_frames, a.separation, a.min_viewpoint_separation, a.min_evidence_time_gap)
+            if bidir == 'dynamic_candidate':
+                cls = bidir
         (dynamic if cls == 'dynamic_candidate' else uncertain)[indices] = True
         centroid = cloud[indices, :3].mean(axis=0)
         rows.append({'cluster_id': int(cluster_id), 'points': len(indices), 'x': float(centroid[0]), 'y': float(centroid[1]), 'z': float(centroid[2]), 'occupied_frames': len(occupied[n]), 'free_frames': len(free[n]), 'occluded_frames': int(occluded_counts[n]), 'first_occupied': min(occupied[n]) if occupied[n] else '', 'last_free': max(free[n]) if free[n] else '', 'classification': cls})
-        frame_evidence.append({'cluster_id': int(cluster_id), 'occupied_timestamps': occupied[n], 'free_timestamps': free[n]})
+        frame_evidence.append({'cluster_id': int(cluster_id), 'occupied_timestamps': occupied[n], 'free_timestamps': free[n], 'bidirectional_pair': pair, 'separated_forward_evidence': forward_evidence})
     a.output.mkdir(parents=True, exist_ok=True)
     for name, mask in [('proposed_kept', ~dynamic), ('dynamic_candidates', dynamic), ('uncertain_clusters', uncertain)]:
         write_pcd(a.output / f'{name}.pcd', cloud[mask])

@@ -116,6 +116,9 @@ def main():
     voxel_offsets = np.r_[0, np.cumsum(counts, dtype=np.int64)]
     a.output.mkdir(parents=True)
     np.savez_compressed(a.output / 'source_provenance.npz', frame_offsets=offsets, source_voxel=source_voxel, voxel_offsets=voxel_offsets, voxel_source_indices=provenance_sort, point_candidate=point_candidate, cluster_membership=group_membership, cluster_candidate=cluster_candidate, free=free, occupied=occupied, occluded=occluded)
+    # A separate query product for a label-aware clustering experiment. It is
+    # not substituted for keyframes or their ray evidence.
+    write_pcd(a.output / 'point_stage_query.pcd', voxelized(world[~point_candidate], a.voxel))
     final = voxelized(world[~first], a.voxel)
     final_reverse = voxelized(world[~second], a.voxel)
     if not np.array_equal(final, final_reverse):

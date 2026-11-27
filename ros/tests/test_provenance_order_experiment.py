@@ -11,9 +11,20 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
 from provenance_order_experiment import decide_orders, voxel_keys, voxelized
 from capture_visibility_evidence import sha256_files, source_hashes
 from multiframe_outlier_review import load_pcd, write_pcd
+from compare_label_aware_orders import labels
 
 
 class ProvenanceOrderTest(unittest.TestCase):
+    def test_label_aware_orders_use_same_observations_but_distinct_groups(self):
+        point = np.array([True, False, False, False])
+        raw_group = np.array([False, True, False, True])
+        after_group = np.array([False, False, True, True])
+        free = np.array([3, 2, 2, 0]); occupied = np.zeros(4, dtype=int)
+        point_first, cluster_first = labels(point, raw_group, after_group, free, occupied)
+        np.testing.assert_array_equal(point_first, [True, False, True, False])
+        np.testing.assert_array_equal(cluster_first, [True, True, False, False])
+        np.testing.assert_array_equal(raw_group, [False, True, False, True])
+
     def test_fixed_candidate_labels_commute(self):
         point = np.array([True, False, True, False])
         cluster = np.array([False, True, True, False])

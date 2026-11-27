@@ -46,6 +46,30 @@ different contributing returns in one voxel can receive different labels.
 The final weak outlier step can protect retained uncertain group voxels using
 `adaptive_outlier_review.py --protected`; this does not prove they are static.
 
+## Label-aware order comparison
+
+`point_stage_query.pcd` is generated from the unlabelled source returns for
+clustering only. It does not modify keyframes or the observations used by ray
+tests. Run `cluster_visibility_review.py` on this query using the same
+parameters and original keyframes as the original-map cluster review, then run:
+
+```
+python3 ros/scripts/compare_label_aware_orders.py \
+  --provenance /path/to/new/order_test \
+  --group-before-point /path/to/same_raw_map_cluster_review \
+  --group-after-point /path/to/point_stage_cluster_review \
+  --output /path/to/new/label_aware_comparison
+```
+
+This compares group-first on the original map with point-first on the
+point-labelled query. Both use the original ray evidence and the same label
+rules; grouping can differ because the candidate query differs. Apply the same
+outlier parameters to each retained map, using its corresponding protected
+file. Candidate labels and group membership are not semantic ground truth.
+Review removed returns and outliers as well as retained structure. The two
+orders are experimental definitions, not a general comparison of all possible
+ordering algorithms.
+
 ```
 # After rebuilding the ROS package with visibility_evidence_export installed:
 python3 ros/scripts/capture_visibility_evidence.py --session /path/to/map_product \

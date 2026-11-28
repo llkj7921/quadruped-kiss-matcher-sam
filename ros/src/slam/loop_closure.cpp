@@ -237,24 +237,29 @@ RegOutput LoopClosure::icpAlignment(const pcl::PointCloud<PointType> &src,
   reg_output.pose_ = local_reg_handler_->getFinalTransformation().cast<double>();
   // if matchness overlapness is over than threshold,
   // that means the registration result is likely to be sufficiently overlapped
-  if (overlapness > config_.gicp_config_.overlap_threshold_) {
+  reg_output.is_converged_ = local_reg_result.converged;
+  if (validFineRegistration(overlapness, config_.gicp_config_.overlap_threshold_,
+                            reg_output.pose_)) {
     reg_output.is_valid_     = true;
-    reg_output.is_converged_ = true;
 
     last_success_icp_time_ = std::chrono::steady_clock::now();
     has_success_icp_time_  = true;
   }
   if (config_.verbose_) {
-    if (overlapness > config_.gicp_config_.overlap_threshold_) {
+    if (reg_output.is_valid_ && !reg_output.is_converged_) {
+      RCLCPP_WARN(logger_, "Fine registration passed overlap but optimizer did not report convergence");
+    }
+    if (reg_output.is_valid_) {
       RCLCPP_INFO(logger_,
                   "Overlapness: \033[1;32m%.2f%% > %.2f%%\033[0m",
                   overlapness,
                   config_.gicp_config_.overlap_threshold_);
     } else {
       RCLCPP_WARN(logger_,
-                  "Overlapness: %.2f%% < %.2f%%\033[0m",
-                  overlapness,
-                  config_.gicp_config_.overlap_threshold_);
+                  "Fine registration rejected: overlap=%.2f%% threshold=%.2f%% converged=%s finite=%s",
+                  overlapness, config_.gicp_config_.overlap_threshold_,
+                  local_reg_result.converged ? "true" : "false",
+                  reg_output.pose_.allFinite() ? "true" : "false");
     }
   }
   return reg_output;
@@ -297,8 +302,7 @@ RegOutput LoopClosure::coarseToFineAlignment(const pcl::PointCloud<PointType> &s
     return reg_output;
   } else {
     const auto &fine_output = icpAlignment(*coarse_aligned_, tgt);
-    reg_output              = fine_output;
-    reg_output.pose_        = fine_output.pose_ * coarse_alignment;
+    reg_output = combineRegistrationResults(fine_output, coarse_alignment, num_inliers);
 
     // Use this cloud to debug whether the transformation is correct.
     // *debug_cloud_        = transformPcd(src, reg_output.pose_);

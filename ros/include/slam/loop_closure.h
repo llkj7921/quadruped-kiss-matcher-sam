@@ -5,6 +5,7 @@
 
 ///// C++ common headers
 #include <iostream>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <tuple>
@@ -59,6 +60,21 @@ struct RegOutput {
   double overlapness_       = 0.0;
   Eigen::Matrix4d pose_     = Eigen::Matrix4d::Identity();
 };
+
+inline bool validFineRegistration(double overlap, double minimum_overlap,
+                                  const Eigen::Matrix4d& pose) {
+  return std::isfinite(overlap) && overlap > minimum_overlap && pose.allFinite();
+}
+
+// Fine registration has its own metrics; preserve the global match inliers.
+inline RegOutput combineRegistrationResults(const RegOutput& fine,
+                                             const Eigen::Matrix4d& coarse,
+                                             std::size_t global_inliers) {
+  RegOutput result = fine;
+  result.pose_ = fine.pose_ * coarse;
+  result.num_final_inliers_ = global_inliers;
+  return result;
+}
 
 class LoopClosure {
  private:

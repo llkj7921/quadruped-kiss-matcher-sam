@@ -25,6 +25,7 @@
 
 #include "kiss_matcher_slam/core/map_product_loader.hpp"
 #include "kiss_matcher_slam/core/frame_and_transform_contract.hpp"
+#include "kiss_matcher_slam/core/relocalization_confirmation.hpp"
 #include "kiss_matcher_slam/core/scan_context_loop_detector.hpp"
 #include "slam/loop_closure.h"
 #include "slam/utils.hpp"
@@ -176,8 +177,7 @@ class MapRelocalizer final : public rclcpp::Node {
         message->mode == slam_system_interfaces::msg::SystemMode::INCREMENTAL_MAPPING;
     if (requested && !relocalization_active_) {
       localized_ = false;
-      have_tentative_ = false;
-      confirmations_ = 0;
+      confirmation_.reset();
       last_query_stamp_ = -std::numeric_limits<double>::infinity();
       relocalization_start_s_ = now().seconds();
       assistance_published_ = false;
@@ -275,6 +275,7 @@ class MapRelocalizer final : public rclcpp::Node {
     const auto local_cloud = kiss_matcher::transformPcd(cloud_in_odom, odom_pose.inverse());
     const auto candidates = detector_->findCandidates(local_cloud, reference_keyframes_);
     if (candidates.empty()) {
+      confirmation_.reset();
       RCLCPP_INFO(get_logger(), "Relocalization: no Scan Context candidate");
       return;
     }
@@ -284,24 +285,14 @@ class MapRelocalizer final : public rclcpp::Node {
       const auto result = registration_->coarseToFineAlignment(local_cloud, target);
       if (!result.is_valid_) continue;
       const Eigen::Matrix4d proposed_map_to_odom = result.pose_ * odom_pose.inverse();
-      if (!have_tentative_ || candidate.keyframe_id != tentative_candidate_ ||
-          !kiss_matcher_slam::transformsConsistent(
-              proposed_map_to_odom, tentative_map_to_odom_,
-              confirmation_translation_m_, confirmation_rotation_rad_)) {
-        tentative_candidate_ = candidate.keyframe_id;
-        tentative_map_to_odom_ = proposed_map_to_odom;
-        confirmations_ = 1;
-      } else {
-        tentative_map_to_odom_ = proposed_map_to_odom;
-        ++confirmations_;
-      }
+      const int confirmations = confirmation_.observe(candidate.keyframe_id,
+          proposed_map_to_odom, confirmation_translation_m_, confirmation_rotation_rad_);
       RCLCPP_INFO(get_logger(),
                   "Relocalization match: map keyframe=%zu SC=%.3f inliers=%zu overlap=%.1f%% confirmation=%d/%d",
                   candidate.keyframe_id, candidate.descriptor_distance, result.num_final_inliers_,
-                  result.overlapness_, confirmations_, required_confirmations_);
-      have_tentative_ = true;
-      if (confirmations_ >= required_confirmations_) {
-        map_to_odom_ = tentative_map_to_odom_;
+                  result.overlapness_, confirmations, required_confirmations_);
+      if (confirmations >= required_confirmations_) {
+        map_to_odom_ = proposed_map_to_odom;
         localized_ = true;
         relocalization_active_ = false;
         RCLCPP_INFO(get_logger(), "Relocalization confirmed: publishing %s -> %s", map_frame_.c_str(), odom_frame_.c_str());
@@ -316,8 +307,7 @@ class MapRelocalizer final : public rclcpp::Node {
       }
       return;
     }
-    have_tentative_ = false;
-    confirmations_ = 0;
+    confirmation_.reset();
     RCLCPP_WARN(get_logger(), "Relocalization: all %zu candidates failed geometric verification", candidates.size());
   }
 
@@ -326,7 +316,7 @@ class MapRelocalizer final : public rclcpp::Node {
   double query_period_s_ = 1.0;
   double last_query_stamp_ = -std::numeric_limits<double>::infinity();
   int required_confirmations_ = 2;
-  int confirmations_ = 0;
+  kiss_matcher_slam::RelocalizationConfirmation confirmation_;
   double confirmation_translation_m_ = 1.0;
   double confirmation_rotation_rad_ = 15.0 * M_PI / 180.0;
   double recovery_timeout_s_ = 10.0;
@@ -337,11 +327,8 @@ class MapRelocalizer final : public rclcpp::Node {
   bool normal_mode_active_ = false;
   bool incremental_mapping_active_ = false;
   bool assistance_published_ = false;
-  bool have_tentative_ = false;
-  std::size_t tentative_candidate_ = 0;
   double voxel_resolution_ = 0.3;
   std::size_t submap_keyframes_ = 1;
-  Eigen::Matrix4d tentative_map_to_odom_ = Eigen::Matrix4d::Identity();
   Eigen::Matrix4d map_to_odom_ = Eigen::Matrix4d::Identity();
   std::vector<kiss_matcher_slam::Keyframe> reference_keyframes_;
   std::unique_ptr<kiss_matcher_slam::ScanContextLoopDetector> detector_;

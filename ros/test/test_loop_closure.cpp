@@ -93,4 +93,46 @@ TEST(LoopClosure, EmptyCloudRegistrationFailsSafely) {
   EXPECT_FALSE(closure.coarseToFineAlignment(empty, empty).is_valid_);
 }
 
+TEST(LoopClosure, FineResultPreservesGlobalInliersAndPoseOrder) {
+  kiss_matcher::RegOutput fine;
+  fine.is_valid_ = true;
+  fine.overlapness_ = 75.0;
+  fine.pose_(0, 3) = 2.0;
+  Eigen::Matrix4d coarse = Eigen::Matrix4d::Identity();
+  coarse(1, 3) = 3.0;
+  const auto combined = kiss_matcher::combineRegistrationResults(fine, coarse, 123);
+  EXPECT_TRUE(combined.is_valid_);
+  EXPECT_EQ(combined.num_final_inliers_, 123U);
+  EXPECT_DOUBLE_EQ(combined.overlapness_, 75.0);
+  EXPECT_TRUE(combined.pose_.isApprox(fine.pose_ * coarse));
+}
+
+TEST(LoopClosure, RequiresOverlapAndFiniteTransform) {
+  Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
+  EXPECT_FALSE(kiss_matcher::validFineRegistration(55.0, 55.0, pose));
+  EXPECT_TRUE(kiss_matcher::validFineRegistration(90.0, 55.0, pose));
+  pose(0, 3) = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(kiss_matcher::validFineRegistration(90.0, 55.0, pose));
+}
+
+TEST(LoopClosure, IdenticalNondegenerateCloudCanMatch) {
+  auto config = testConfig();
+  config.gicp_config_.overlap_threshold_ = 55.0;
+  kiss_matcher::LoopClosure closure(config, rclcpp::get_logger("test"));
+  pcl::PointCloud<PointType> cloud;
+  for (int x = 0; x < 12; ++x) {
+    for (int y = 0; y < 12; ++y) {
+      PointType point;
+      point.x = x * 0.2f;
+      point.y = y * 0.2f;
+      point.z = static_cast<float>(0.2 * std::sin(x * 0.7) + 0.1 * std::cos(y * 0.4));
+      point.intensity = 1.0f;
+      cloud.push_back(point);
+    }
+  }
+  const auto result = closure.icpAlignment(cloud, cloud);
+  EXPECT_TRUE(result.is_valid_);
+  EXPECT_TRUE(result.pose_.isApprox(Eigen::Matrix4d::Identity(), 0.03));
+}
+
 }  // namespace

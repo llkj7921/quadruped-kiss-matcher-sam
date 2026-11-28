@@ -229,6 +229,9 @@ install(TARGETS
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_relocalization_confirmation test/test_relocalization_confirmation.cpp)
+  target_include_directories(test_relocalization_confirmation PRIVATE include ${PCL_INCLUDE_DIRS})
+  target_link_libraries(test_relocalization_confirmation kiss_matcher_slam_core)
   ament_add_gtest(test_visibility_map_filter test/test_visibility_map_filter.cpp)
   target_include_directories(test_visibility_map_filter PRIVATE include ${PCL_INCLUDE_DIRS})
   target_link_libraries(test_visibility_map_filter kiss_matcher_slam_core ${PCL_LIBRARIES})
